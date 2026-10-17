@@ -4,7 +4,7 @@ JMon is a terminal-based monitoring tool for Java developers. Inspired by `htop`
 
 JMon runs as a standalone CLI/TUI application. It does not need to be embedded into the Java applications it monitors.
 
-## Jmon Terminal UI
+## JMon Terminal UI
 
 ![JMon Terminal Interface](screenshots/jmon_dashboard.png)
 
@@ -15,31 +15,28 @@ JMon runs as a standalone CLI/TUI application. It does not need to be embedded i
 - **JVM Metrics:** JVM uptime, heap and non-heap memory, thread counts, loaded classes, and garbage collection statistics.
 - **Memory Analysis:** Class histogram analysis and memory investigation tools.
 - **Interactive Terminal UI:** Live refresh, keyboard navigation, and an `htop`-inspired interface.
+- **Version Information:** Display the installed version with `jmon --version`.
 
 ## Installation
 
+### Requirements
+
+- Java 17 or later.
+- A supported terminal environment.
+- Appropriate operating-system permissions to inspect or attach to the target JVM.
+
 ### macOS and Linux
 
-JMon can be installed using the installation script. Java 17 or later is required.
+JMon can be installed using the installation script.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/GokhanDurmaz/jmon/main/install.sh -o install.sh
 bash install.sh
 ```
 
-### Windows
+The installer downloads the latest published GitHub Release and installs JMon under your user directory.
 
-JMon can be installed using PowerShell. Java 17 or later is required.
-
-```powershell
-irm https://raw.githubusercontent.com/GokhanDurmaz/jmon/main/install-windows.ps1 | iex
-```
-
-The installer downloads the latest JMon release, installs it under your user directory, and adds the `jmon` command to your user `PATH`.
-
-After installation, open a new terminal and run:
-
-The installer downloads the latest published GitHub Release and installs JMon under:
+Default locations:
 
 - **Application:** `~/.local/opt/jmon`
 - **Command:** `~/.local/bin/jmon`
@@ -53,34 +50,72 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-Verify the installation:
+### Windows (CMD)
 
-```bash
-jmon 
+JMon can be installed using the Windows batch installer. Java 17 or later is required.
+
+1. Download `install-windows.bat` from the repository.
+2. Open **Command Prompt (CMD)**.
+3. Navigate to the directory where you downloaded the file.
+4. Run the installer:
+
+```cmd
+cd /d "%USERPROFILE%\Downloads"
+install-windows.bat
 ```
 
-> **Note:** The installation script downloads the latest published release. A successful GitHub Actions build alone does not guarantee that a release has been published.
+The installer downloads the latest published GitHub Release, extracts JMon to your user directory, and adds the application's `bin` directory to your user `PATH`.
 
-### Updating JMon
+The default installation directory is:
 
-Run the installation command again to install the latest published release:
+```text
+%USERPROFILE%\.local\opt\jmon
+```
+
+Close CMD and open a new window after installation so that the updated `PATH` takes effect.
+
+Verify the installation:
+
+```cmd
+java -version
+jmon --version
+jmon --help
+```
+
+**Note:** Java 17 or later must be available in your terminal's `PATH`. If Java 8 is selected instead, update your `JAVA_HOME` and `PATH` to point to your Java 17+ installation.
+
+The Windows installer requires a published GitHub Release containing `jmon-windows.zip`. A successful GitHub Actions build alone does not guarantee that a release has been published.
+
+## Updating JMon
+
+To update JMon, run the installation command again for your platform. The installer downloads the latest published release.
+
+For macOS and Linux, run:
 
 ```bash
 bash install.sh
 ```
 
-If you no longer have the installer script, download it again using the commands in the Installation section.
+For Windows, download the latest `install-windows.bat` from the repository and run it again from CMD.
 
-### Uninstalling
+## Uninstalling
 
-Remove the installed command and application files:
+### macOS and Linux
 
 ```bash
 rm -f ~/.local/bin/jmon
 rm -rf ~/.local/opt/jmon
 ```
 
-This does not remove your source-code checkout or project files.
+### Windows (CMD)
+
+```cmd
+rmdir /S /Q "%USERPROFILE%\.local\opt\jmon"
+```
+
+You can also remove `%USERPROFILE%\.local\opt\jmon\bin` from your user `PATH` if you no longer use JMon.
+
+Uninstalling does not remove your source-code checkout or project files.
 
 ## Usage
 
@@ -91,6 +126,32 @@ jmon --pid 12345
 ```
 
 Replace `12345` with the PID of the Java process you want to monitor.
+
+On Windows, use the same JMon arguments from CMD:
+
+```cmd
+jmon --pid 12345
+```
+
+To list Java processes, you can use:
+
+```bash
+jps -l
+```
+
+`jps` is included with the JDK.
+
+### Display version
+
+```bash
+jmon --version
+```
+
+The short form is also supported:
+
+```bash
+jmon -v
+```
 
 ### Display help
 
@@ -108,10 +169,22 @@ cd jmon
 ./gradlew build
 ```
 
-Run JMon through Gradle:
+On Windows, use the Gradle wrapper batch file:
+
+```cmd
+gradlew.bat build
+```
+
+Run JMon through Gradle on macOS or Linux:
 
 ```bash
 ./gradlew run --args="--pid 12345"
+```
+
+On Windows:
+
+```cmd
+gradlew.bat run --args="--pid 12345"
 ```
 
 Alternatively, create a local application distribution:
@@ -121,11 +194,19 @@ Alternatively, create a local application distribution:
 ./build/install/jmon/bin/jmon --pid 12345
 ```
 
-## Requirements
+On Windows:
+
+```cmd
+gradlew.bat installDist
+build\install\jmon\bin\jmon.bat --pid 12345
+```
+
+## Requirements and Platform Support
 
 - Java 17 or later.
-- macOS or Linux (primary target platforms).
-- Appropriate operating-system permissions to inspect or attach to the target JVM. Depending on the environment, additional permissions may be required.
+- macOS and Linux are primary target platforms.
+- Windows distribution and installation are provided; some monitoring capabilities may differ by operating system.
+- Appropriate operating-system permissions may be required to inspect or attach to the target JVM.
 
 ## Technology Stack
 
@@ -153,7 +234,7 @@ Alternatively, create a local application distribution:
 - **Spring Boot Metrics:** Integration with Spring Boot Actuator and Micrometer endpoints.
 - **Disk Monitoring:** Disk capacity and I/O metrics.
 - **Remote JMX:** Current JVM metrics focus on local processes through the Attach API.
-- **Windows Support:** Planned; macOS and Linux are the primary targets.
+- **Cross-platform Improvements:** Further testing and refinement of Windows-specific monitoring behavior.
 
 ## Development
 
