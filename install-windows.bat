@@ -1,120 +1,300 @@
+
 @echo off
-setlocal
+setlocal EnableExtensions EnableDelayedExpansion
 
 title JMon Windows Installer
 
 set "REPO=GokhanDurmaz/jmon"
 set "INSTALL_ROOT=%USERPROFILE%\.local\opt\jmon"
-set "BIN_DIR=%USERPROFILE%\.local\bin"
+set "INSTALL_BIN=%USERPROFILE%\.local\opt\jmon\bin"
 set "TEMP_DIR=%TEMP%\jmon-install-%RANDOM%-%RANDOM%"
 set "ZIP_FILE=%TEMP_DIR%\jmon-windows.zip"
 set "EXTRACT_DIR=%TEMP_DIR%\extracted"
+set "BACKUP_ROOT=%USERPROFILE%\.local\opt\jmon.backup"
+set "VERSION_FILE=%TEMP%\jmon-java-version.txt"
+set "JDK21="
 
 echo.
-echo ========================================
-echo          JMon Windows Installer
-echo ========================================
+echo ==========================================
+echo        JMon Windows Installer
+echo ==========================================
 echo.
 
-where java >nul 2>&1
-if errorlevel 1 (
-    echo ERROR: Java is not available in PATH.
-    echo Install Java 21 and reopen CMD.
-    goto :fail
-)
+echo [1/6] Searching for Java 21...
+call :SCAN_JDK
 
-echo Checking Java version...
-java -version 2> "%TEMP%\jmon-java-version.txt"
-type "%TEMP%\jmon-java-version.txt"
-findstr /C:"1.8." "%TEMP%\jmon-java-version.txt" >nul
-if not errorlevel 1 (
+if not defined JDK21 (
+    echo Java 21 was not found. Installing Temurin JDK 21...
     echo.
-    echo ERROR: Java 8 is active in CMD.
-    echo Fix JAVA_HOME and PATH to use Java 21.
-    del "%TEMP%\jmon-java-version.txt" >nul 2>&1
-    goto :fail
+
+    where.exe winget >nul 2>&1
+    if errorlevel 1 (
+        echo ERROR: winget is not available.
+        echo Install Microsoft App Installer first:
+        echo https://aka.ms/getwinget
+        goto :FAIL
+    )
+
+    winget install --id EclipseAdoptium.Temurin.21.JDK --exact --accept-source-agreements --accept-package-agreements
+
+    if errorlevel 1 (
+        echo.
+        echo ERROR: Java 21 installation failed.
+        echo Check winget output and retry this installer.
+        goto :FAIL
+    )
+
+    echo.
+    echo Searching for the newly installed JDK...
+    call :SCAN_JDK
 )
-del "%TEMP%\jmon-java-version.txt" >nul 2>&1
+
+if not defined JDK21 (
+    echo ERROR: Java 21 was not found after installation.
+    echo Check your JDK installation and try again.
+    goto :FAIL
+)
+
+echo Java 21 found:
+echo %JDK21%
+echo.
+
+echo [2/6] Setting user JAVA_HOME and PATH...
+
+set "JMON_JAVA_HOME=%JDK21%"
+set "JMON_INSTALL_BIN=%INSTALL_BIN%"
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ^
+ "$ErrorActionPreference = 'Stop'; try {" ^
+ "$jdk = $env:JMON_JAVA_HOME;" ^
+ "$jdkBin = Join-Path $jdk 'bin';" ^
+ "$jmonBin = $env:JMON_INSTALL_BIN;" ^
+ "[Environment]::SetEnvironmentVariable('JAVA_HOME', $jdk, 'User');" ^
+ "$old = [Environment]::GetEnvironmentVariable('Path', 'User');" ^
+ "$items = @($old -split ';' | Where-Object {" ^
+ "$_ -and $_.TrimEnd('\') -ine $jdkBin.TrimEnd('\') -and $_.TrimEnd('\') -ine $jmonBin.TrimEnd('\')" ^
+ "});" ^
+ "$new = (@($jdkBin, $jmonBin) + $items) -join ';';" ^
+ "[Environment]::SetEnvironmentVariable('Path', $new, 'User');" ^
+ "} catch { Write-Error $_; exit 1 }"
+
+if errorlevel 1 (
+    echo ERROR: Could not update user environment variables.
+    goto :FAIL
+)
+
+echo JAVA_HOME and user PATH updated.
+echo.
+
+echo [3/6] Preparing download...
 
 mkdir "%TEMP_DIR%" >nul 2>&1
-if errorlevel 1 (
+if not exist "%TEMP_DIR%" (
     echo ERROR: Cannot create temporary directory.
-    goto :fail
+    goto :FAIL
 )
 
-echo.
+where.exe curl.exe >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: curl.exe is not available.
+    goto :FAIL
+)
+
 echo Downloading the latest JMon release...
-curl.exe -fL --retry 2 ^
-    "https://github.com/%REPO%/releases/latest/download/jmon-windows.zip" ^
-    -o "%ZIP_FILE%"
+
+curl.exe -fL --retry 2 --connect-timeout 20 ^
+ "https://github.com/%REPO%/releases/latest/download/jmon-windows.zip" ^
+ -o "%ZIP_FILE%"
 
 if errorlevel 1 (
     echo.
     echo ERROR: Download failed.
-    echo Check that a GitHub Release contains jmon-windows.zip.
-    goto :fail
+    echo Make sure a published GitHub Release contains:
+    echo jmon-windows.zip
+    goto :FAIL
 )
 
-echo Extracting files...
-powershell.exe -NoProfile -Command ^
-    "Expand-Archive -LiteralPath '%ZIP_FILE%' -DestinationPath '%EXTRACT_DIR%' -Force"
+if not exist "%ZIP_FILE%" (
+    echo ERROR: Downloaded archive was not found.
+    goto :FAIL
+)
+
+for %%F in ("%ZIP_FILE%") do if %%~zF LEQ 0 (
+    echo ERROR: Downloaded archive is empty.
+    goto :FAIL
+)
+
+echo.
+echo [4/6] Extracting and validating the package...
+
+set "JMON_ZIP=%ZIP_FILE%"
+set "JMON_EXTRACT=%EXTRACT_DIR%"
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ^
+ "$ErrorActionPreference = 'Stop'; try {" ^
+ "Expand-Archive -LiteralPath $env:JMON_ZIP -DestinationPath $env:JMON_EXTRACT -Force;" ^
+ "if (-not (Test-Path (Join-Path $env:JMON_EXTRACT 'jmon\bin\jmon.bat'))) {" ^
+ "throw 'The archive does not contain jmon\bin\jmon.bat'" ^
+ "}" ^
+ "} catch { Write-Error $_; exit 1 }"
 
 if errorlevel 1 (
-    echo ERROR: Could not extract the archive.
-    goto :fail
+    echo ERROR: Archive extraction or validation failed.
+    goto :FAIL
 )
 
-if not exist "%EXTRACT_DIR%\jmon\bin\jmon.bat" (
-    echo ERROR: jmon.bat was not found in the archive.
-    goto :fail
+echo Package validated.
+echo.
+
+echo [5/6] Installing JMon...
+
+if not exist "%USERPROFILE%\.local\opt" (
+    mkdir "%USERPROFILE%\.local\opt"
 )
 
-echo Installing JMon...
+if exist "%BACKUP_ROOT%" (
+    rmdir /S /Q "%BACKUP_ROOT%"
+)
+
 if exist "%INSTALL_ROOT%" (
-    rmdir /S /Q "%INSTALL_ROOT%"
+    move "%INSTALL_ROOT%" "%BACKUP_ROOT%" >nul
+    if errorlevel 1 (
+        echo ERROR: Could not back up the existing installation.
+        goto :FAIL
+    )
 )
 
-mkdir "%USERPROFILE%\.local\opt" >nul 2>&1
 move "%EXTRACT_DIR%\jmon" "%INSTALL_ROOT%" >nul
 
 if errorlevel 1 (
-    echo ERROR: Could not install JMon.
-    goto :fail
+    echo ERROR: Could not move JMon into the installation directory.
+
+    if exist "%BACKUP_ROOT%" (
+        move "%BACKUP_ROOT%" "%INSTALL_ROOT%" >nul
+    )
+
+    goto :FAIL
 )
 
-echo Updating your user PATH...
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$p = [Environment]::GetEnvironmentVariable('Path','User');" ^
-    "$d = '%INSTALL_ROOT%\bin';" ^
-    "$items = @($p -split ';' | Where-Object { $_ });" ^
-    "if (-not ($items | Where-Object { $_.TrimEnd('\') -ieq $d.TrimEnd('\') })) {" ^
-    "$new = (@($items) + $d) -join ';';" ^
-    "[Environment]::SetEnvironmentVariable('Path',$new,'User') }"
+if exist "%BACKUP_ROOT%" (
+    rmdir /S /Q "%BACKUP_ROOT%"
+)
+
+echo JMon installed successfully.
+echo.
+
+echo [6/6] Verifying installation...
+
+rem Use Java 21 immediately in this installer process.
+set "PATH=%JDK21%\bin;%INSTALL_BIN%;%PATH%"
+set "JAVA_HOME=%JDK21%"
+
+echo.
+echo Java version:
+"%JDK21%\bin\java.exe" -version
 
 if errorlevel 1 (
-    echo WARNING: PATH could not be updated automatically.
-    echo Add this directory to your user PATH manually:
-    echo %INSTALL_ROOT%\bin
+    echo ERROR: Java 21 could not be started.
+    goto :FAIL
 )
 
-rmdir /S /Q "%TEMP_DIR%" >nul 2>&1
+echo.
+echo JMon version:
+call "%INSTALL_BIN%\jmon.bat" --version
+
+if errorlevel 1 (
+    echo WARNING: JMon version check failed.
+    echo Try running jmon --help after installation.
+)
 
 echo.
-echo ========================================
-echo JMon installation finished!
+echo Java executable resolved by this CMD:
+where.exe java
+
 echo.
-echo Close this CMD window and open a new one.
+echo JMon executable:
+where.exe jmon
+
+echo.
+echo ==========================================
+echo Installation finished.
+echo.
+echo Close this window and open a NEW CMD.
 echo Then run:
-echo     jmon --version
-echo     jmon --help
-echo ========================================
 echo.
+echo   java -version
+echo   where java
+echo   jmon --version
+echo   jmon --help
+echo ==========================================
+echo.
+
+if exist "%TEMP_DIR%" rmdir /S /Q "%TEMP_DIR%" >nul 2>&1
+if exist "%VERSION_FILE%" del "%VERSION_FILE%" >nul 2>&1
+
 pause
 exit /b 0
 
-:fail
+
+:SCAN_JDK
+set "JDK21="
+
+rem Check the configured JAVA_HOME first.
+if defined JAVA_HOME (
+    if exist "%JAVA_HOME%\bin\java.exe" (
+        call :CHECK_JAVA "%JAVA_HOME%\bin\java.exe"
+    )
+)
+
+rem Check every java.exe visible through the current PATH.
+for /f "delims=" %%J in ('where.exe java 2^>nul') do (
+    call :CHECK_JAVA "%%J"
+)
+
+rem Check common JDK installation locations.
+for /d %%D in ("%ProgramFiles%\Eclipse Adoptium\jdk-21*") do (
+    call :CHECK_JAVA "%%~D\bin\java.exe"
+)
+
+for /d %%D in ("%ProgramFiles%\Java\jdk-21*") do (
+    call :CHECK_JAVA "%%~D\bin\java.exe"
+)
+
+for /d %%D in ("%ProgramFiles%\Microsoft\jdk-21*") do (
+    call :CHECK_JAVA "%%~D\bin\java.exe"
+)
+
+exit /b 0
+
+
+:CHECK_JAVA
+if defined JDK21 exit /b 0
+if not exist "%~1" exit /b 0
+
+rem java -version writes its version information to stderr.
+"%~1" -version >nul 2>"%VERSION_FILE%"
+
+if errorlevel 1 exit /b 0
+
+findstr /C:"21." "%VERSION_FILE%" >nul
+if errorlevel 1 exit /b 0
+
+rem java.exe is inside the JDK's bin directory.
+for %%I in ("%~dp1..") do set "JDK21=%%~fI"
+
+exit /b 0
+
+
+:FAIL
 echo.
-echo Installation failed. Read the error above.
+echo ==========================================
+echo Installation failed.
+echo Review the error messages above.
+echo ==========================================
+echo.
+
 if exist "%TEMP_DIR%" rmdir /S /Q "%TEMP_DIR%" >nul 2>&1
+if exist "%VERSION_FILE%" del "%VERSION_FILE%" >nul 2>&1
+
 pause
 exit /b 1
