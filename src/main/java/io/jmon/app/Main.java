@@ -6,11 +6,24 @@ import io.jmon.tui.Tui;
 public class Main {
 
     public static void main(String[] args) {
+        String version = System.getProperty("jmon.version", "development");
+
+        for (String arg : args) {
+            if ("--version".equals(arg) || "-v".equals(arg)) {
+                System.out.println("JMon " + version);
+                return;
+            }
+
+            if ("--help".equals(arg) || "-h".equals(arg)) {
+                printUsage();
+                return;
+            }
+        }
+
         Integer pid = parsePid(args);
 
         if (pid == null || pid <= 0) {
-            System.err.println("Usage: jmon --pid <java-process-id>");
-            System.err.println("Example: jmon --pid 12345");
+            printUsage();
             System.exit(2);
             return;
         }
@@ -19,6 +32,18 @@ public class Main {
                 MonitorConfiguration.builder().build();
 
         new Tui(config, pid).start();
+    }
+
+    private static void printUsage() {
+        System.out.println("JMon - Java Terminal Monitor");
+        System.out.println();
+        System.out.println("Usage:");
+        System.out.println("  jmon --pid <java-process-id>");
+        System.out.println("  jmon --version, -v");
+        System.out.println("  jmon --help, -h");
+        System.out.println();
+        System.out.println("Example:");
+        System.out.println("  jmon --pid 12345");
     }
 
     private static Integer parsePid(String[] args) {

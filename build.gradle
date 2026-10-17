@@ -3,6 +3,10 @@ plugins {
     id 'application'
 }
 
+version = providers.gradleProperty('releaseVersion')
+        .orElse('0.0.0-dev')
+        .get()
+
 configurations.all {
     resolutionStrategy {
         force 'com.github.oshi:oshi-core:6.4.10'
@@ -34,6 +38,8 @@ java {
 
 application {
     mainClass = 'io.jmon.app.Main'
+    applicationName = 'jmon'
+    applicationDefaultJvmArgs = ["-Djmon.version=${project.version}"]
 }
 
 test {

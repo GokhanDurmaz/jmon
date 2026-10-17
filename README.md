@@ -27,6 +27,18 @@ curl -fsSL https://raw.githubusercontent.com/GokhanDurmaz/jmon/main/install.sh -
 bash install.sh
 ```
 
+### Windows
+
+JMon can be installed using PowerShell. Java 17 or later is required.
+
+```powershell
+irm https://raw.githubusercontent.com/GokhanDurmaz/jmon/main/install-windows.ps1 | iex
+```
+
+The installer downloads the latest JMon release, installs it under your user directory, and adds the `jmon` command to your user `PATH`.
+
+After installation, open a new terminal and run:
+
 The installer downloads the latest published GitHub Release and installs JMon under:
 
 - **Application:** `~/.local/opt/jmon`
@@ -44,7 +56,7 @@ source ~/.zshrc
 Verify the installation:
 
 ```bash
-jmon --help
+jmon 
 ```
 
 > **Note:** The installation script downloads the latest published release. A successful GitHub Actions build alone does not guarantee that a release has been published.
