@@ -34,6 +34,11 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           ./gradlew -PreleaseVersion="$VERSION" clean test installDist
 
+      - name: Verify Windows launcher
+        run: |
+          test -f build/install/jmon/bin/jmon.bat
+          echo "Windows launcher found."
+
       - name: Package distributions
         run: |
           tar -czf jmon.tar.gz -C build/install jmon
@@ -42,6 +47,9 @@ jobs:
           cd build/install
           zip -r ../../jmon-windows.zip jmon
           cd ../..
+          
+          unzip -l jmon-windows.zip
+          unzip -Z1 jmon-windows.zip | grep -Fx "jmon/bin/jmon.bat"
           
           sha256sum jmon-windows.zip > jmon-windows.zip.sha256
 
