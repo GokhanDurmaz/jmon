@@ -60,8 +60,8 @@ JMon can be installed using the Windows batch installer. Java 17 or later is req
 4. Run the installer:
 
 ```cmd
-cd /d "%USERPROFILE%\Downloads"
-install-windows.bat
+curl.exe -fL https://raw.githubusercontent.com/GokhanDurmaz/jmon/main/install-windows.bat -o "%USERPROFILE%\Downloads\install-windows.bat"
+"%USERPROFILE%\Downloads\install-windows.bat"
 ```
 
 The installer downloads the latest published GitHub Release, extracts JMon to your user directory, and adds the application's `bin` directory to your user `PATH`.
