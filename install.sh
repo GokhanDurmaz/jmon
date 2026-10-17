@@ -72,19 +72,55 @@ echo "Install location: $INSTALL_ROOT"
 echo "Command: $BIN_DIR/jmon"
 echo
 
+
 case ":$PATH:" in
   *":$BIN_DIR:"*)
-    echo "Run: jmon --help"
+    echo "JMon command directory is already in PATH."
     ;;
   *)
-    echo "Add the following directory to your PATH:"
-    echo "  $BIN_DIR"
-    echo
-    echo "For zsh, add this line to ~/.zshrc:"
-    echo "  export PATH=\"$BIN_DIR:\$PATH\""
-    echo
-    echo "Then reload your shell:"
-    echo "  source ~/.zshrc"
+    SHELL_NAME="$(basename "${SHELL:-/bin/zsh}")"
+
+    case "$SHELL_NAME" in
+      zsh)
+        SHELL_RC="$HOME/.zshrc"
+        ;;
+      bash)
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+          SHELL_RC="$HOME/.bash_profile"
+        else
+          SHELL_RC="$HOME/.bashrc"
+        fi
+        ;;
+      *)
+        SHELL_RC=""
+        ;;
+    esac
+
+    if [[ -n "$SHELL_RC" ]]; then
+      mkdir -p "$(dirname "$SHELL_RC")"
+      touch "$SHELL_RC"
+
+      if ! grep -Fq '# JMon CLI PATH' "$SHELL_RC"; then
+        {
+          echo
+          echo '# JMon CLI PATH'
+          printf 'export PATH="%s:$PATH"\n' "$BIN_DIR"
+        } >> "$SHELL_RC"
+
+        echo "Added JMon to PATH in $SHELL_RC"
+      else
+        echo "JMon PATH configuration already exists in $SHELL_RC"
+      fi
+
+      echo "Open a new terminal or run:"
+      echo "  source \"$SHELL_RC\""
+    else
+      echo "Add $BIN_DIR to your shell's PATH manually."
+    fi
     ;;
 esac
+
+echo
+echo "Verify installation with: jmon --help"
+
 
