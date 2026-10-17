@@ -4,6 +4,10 @@ JMon is a terminal-based monitoring tool for Java developers. Inspired by `htop`
 
 JMon runs as a standalone CLI/TUI application. It does not need to be embedded into the Java applications it monitors.
 
+## Jmon Terminal UI
+
+![JMon Terminal Interface](screenshots/jmon_dashboard.png)
+
 ## Features
 
 - **System Monitoring:** Real-time CPU and memory utilization.
