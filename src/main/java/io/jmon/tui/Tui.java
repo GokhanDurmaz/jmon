@@ -383,18 +383,21 @@ public class Tui {
 
         double cpu =
                 system.getCpuUtilization().orElse(0.0) * 100.0;
-
+        addSample(systemCpuHistory, cpu);
+        
         long totalBytes = system.getTotalMemory().orElse(0L);
         long freeBytes = system.getFreeMemory().orElse(0L);
-
+        
         double usedRamBytes = Math.max(0L, totalBytes - freeBytes);
         double ramPercent = totalBytes > 0
                 ? usedRamBytes / totalBytes * 100.0
                 : 0.0;
-
+        addSample(systemRamHistory, ramPercent);
+        
         double heapPercent = jvm.heapMax() > 0
                 ? (double) jvm.heapUsed() / jvm.heapMax() * 100.0
                 : 0.0;
+        addSample(heapHistory, heapPercent);
 
         String statusColor = switch (health.status()) {
             case OK -> GREEN;
