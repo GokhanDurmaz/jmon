@@ -1,7 +1,9 @@
 package io.jmon.app;
 
 import io.jmon.core.MonitorConfiguration;
+import io.jmon.core.HealthEvaluator;
 import io.jmon.tui.Tui;
+import io.jmon.tui.TuiRenderer;
 import io.jmon.system.*;
 
 public class Main {
@@ -38,7 +40,9 @@ public class Main {
                 new RealSystemMetricsCollector(),
                 new TargetProcessCollector(),
                 new ClassHistogramCollector(),
-                new MemoryLeakDetector()
+                new MemoryLeakDetector(),
+                new HealthEvaluator(),
+                new TuiRenderer()
         );
         tui.start();
     }

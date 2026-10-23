@@ -40,15 +40,17 @@ public class Tui {
             SystemMetricsCollector systemCollector,
             TargetProcessCollector processCollector,
             ClassHistogramCollector classHistogramCollector,
-            MemoryLeakDetector memoryLeakDetector) {
+            MemoryLeakDetector memoryLeakDetector,
+            HealthEvaluator healthEvaluator,
+            TuiRenderer renderer) {
         this.config = config;
         this.targetPid = targetPid;
         this.systemCollector = systemCollector;
         this.processCollector = processCollector;
         this.classHistogramCollector = classHistogramCollector;
         this.memoryLeakDetector = memoryLeakDetector;
-        this.renderer = new TuiRenderer();
-        this.healthEvaluator = new HealthEvaluator();
+        this.renderer = renderer;
+        this.healthEvaluator = healthEvaluator;
     }
 
     public void start() {
