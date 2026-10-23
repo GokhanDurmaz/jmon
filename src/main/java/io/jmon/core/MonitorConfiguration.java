@@ -8,12 +8,16 @@ public class MonitorConfiguration {
     private final Optional<String> springBootEndpoint;
     private final Optional<String> springBootUsername;
     private final Optional<String> springBootPassword;
+    private final Duration requestTimeout;
+    private final Duration connectTimeout;
 
     private MonitorConfiguration(Builder builder) {
         this.refreshInterval = builder.refreshInterval;
         this.springBootEndpoint = builder.springBootEndpoint;
         this.springBootUsername = builder.springBootUsername;
         this.springBootPassword = builder.springBootPassword;
+        this.requestTimeout = builder.requestTimeout;
+        this.connectTimeout = builder.connectTimeout;
     }
 
     public static Builder builder() {
@@ -36,11 +40,21 @@ public class MonitorConfiguration {
         return springBootPassword;
     }
 
+    public Duration getRequestTimeout() {
+        return requestTimeout;
+    }
+
+    public Duration getConnectTimeout() {
+        return connectTimeout;
+    }
+
     public static class Builder {
         private Duration refreshInterval = Duration.ofSeconds(3);
         private Optional<String> springBootEndpoint = Optional.empty();
         private Optional<String> springBootUsername = Optional.empty();
         private Optional<String> springBootPassword = Optional.empty();
+        private Duration requestTimeout = Duration.ofSeconds(10);
+        private Duration connectTimeout = Duration.ofSeconds(5);
 
         public Builder refreshInterval(Duration refreshInterval) {
             this.refreshInterval = refreshInterval;
@@ -59,6 +73,16 @@ public class MonitorConfiguration {
 
         public Builder springBootPassword(String springBootPassword) {
             this.springBootPassword = Optional.of(springBootPassword);
+            return this;
+        }
+
+        public Builder requestTimeout(Duration requestTimeout) {
+            this.requestTimeout = requestTimeout;
+            return this;
+        }
+
+        public Builder connectTimeout(Duration connectTimeout) {
+            this.connectTimeout = connectTimeout;
             return this;
         }
 

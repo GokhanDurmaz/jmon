@@ -2,6 +2,7 @@ package io.jmon.app;
 
 import io.jmon.core.MonitorConfiguration;
 import io.jmon.tui.Tui;
+import io.jmon.system.*;
 
 public class Main {
 
@@ -31,7 +32,15 @@ public class Main {
         MonitorConfiguration config =
                 MonitorConfiguration.builder().build();
 
-        new Tui(config, pid).start();
+        Tui tui = new Tui(
+                config,
+                pid,
+                new RealSystemMetricsCollector(),
+                new TargetProcessCollector(),
+                new ClassHistogramCollector(),
+                new MemoryLeakDetector()
+        );
+        tui.start();
     }
 
     private static void printUsage() {
