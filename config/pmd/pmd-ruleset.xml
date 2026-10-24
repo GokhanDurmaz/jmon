@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  JMon PMD rules: small hand-picked set focused on correctness, threading,
+  and security mistakes. Formatting/style rules are deliberately omitted.
+  Findings on pre-existing code are documented in PROJECT_STATUS.md rather
+  than silently refactored.
+-->
+<ruleset name="jmon-minimal"
+        xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0
+                    http://pmd.sourceforge.net/ruleset_2_0_0.xsd">
+    <description>JMon minimal static analysis ruleset</description>
+
+    <!-- Correctness.
+         allowCommentedBlocks: an empty catch that carries an explanatory
+         comment (documented platform variance such as "swap unavailable on
+         this platform") is treated as intentional by the rule itself. -->
+    <rule ref="category/java/errorprone.xml/EmptyCatchBlock">
+        <properties>
+            <property name="allowCommentedBlocks" value="true"/>
+        </properties>
+    </rule>
+    <rule ref="category/java/errorprone.xml/BrokenNullCheck"/>
+    <rule ref="category/java/errorprone.xml/UnconditionalIfStatement"/>
+    <rule ref="category/java/errorprone.xml/DoNotTerminateVM"/>
+    <rule ref="category/java/errorprone.xml/AvoidDecimalLiteralsInBigDecimalConstructor"/>
+    <rule ref="category/java/multithreading.xml/AvoidThreadGroup"/>
+    <rule ref="category/java/security.xml/HardCodedCryptoKey"/>
+</ruleset>

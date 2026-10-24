@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<!DOCTYPE suppressions PUBLIC
+        "-//Checkstyle//DTD SuppressionFilter Configuration 1.2//EN"
+        "https://checkstyle.org/dtds/suppressions_1_2.dtd">
+<!--
+  Targeted suppressions, each with a justification.
+
+  The SpringBootMetricsClient / SpringBootActuatorIntegrationTest files
+  are part of the protected staged Actuator-integration snapshot that is
+  still awaiting an explicit user decision to commit. To keep both Git
+  layers intact while the decision is pending, pre-existing findings in
+  those files are suppressed by file+line instead of being refactored.
+  Remove these suppressions once the staged integration is committed and
+  the findings can be fixed in place.
+-->
+<suppressions>
+    <!-- Intentional per-metric failure isolation: a single failed future
+         join must not abort the whole metric snapshot. The catch is empty
+         because ignored metrics are simply dropped. -->
+    <suppress checks="EmptyCatchBlock"
+            files="src/main/java/io/jmon/spring/SpringBootMetricsClient\.java"
+            lines="167"/>
+
+    <!-- Unused import documented for removal with the staged snapshot. -->
+    <suppress checks="UnusedImports"
+            files="src/test/java/io/jmon/spring/SpringBootActuatorIntegrationTest\.java"
+            lines="3"/>
+</suppressions>

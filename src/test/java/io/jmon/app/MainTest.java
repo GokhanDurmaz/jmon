@@ -93,4 +93,80 @@ class MainTest {
         assertEquals(Duration.ofSeconds(7), config.getRefreshInterval());
         assertEquals("http://localhost:8080", config.getSpringBootEndpoint().get());
     }
+
+    @Test
+    void testLeakWindowMinutesBothSyntaxes() {
+        MonitorConfiguration equal =
+                Main.configureSpringBoot(
+                        MonitorConfiguration.builder(),
+                        new String[] {"--leak-window-minutes=45"}
+                ).build();
+
+        MonitorConfiguration separate =
+                Main.configureSpringBoot(
+                        MonitorConfiguration.builder(),
+                        new String[] {
+                                "--leak-window-minutes", "45"
+                        }
+                ).build();
+
+        assertEquals(Duration.ofMinutes(45), equal.getLeakObservationWindow());
+        assertEquals(Duration.ofMinutes(45),
+                separate.getLeakObservationWindow());
+    }
+
+    @Test
+    void testLeakWindowOutOfRangeRejected() {
+        assertThrows(IllegalArgumentException.class, () ->
+                Main.configureSpringBoot(
+                        MonitorConfiguration.builder(),
+                        new String[] {"--leak-window-minutes", "0"}
+                ).build());
+
+        assertThrows(IllegalArgumentException.class, () ->
+                Main.configureSpringBoot(
+                        MonitorConfiguration.builder(),
+                        new String[] {"--leak-window-minutes=1441"}
+                ).build());
+
+        assertThrows(IllegalArgumentException.class, () ->
+                Main.configureSpringBoot(
+                        MonitorConfiguration.builder(),
+                        new String[] {"--leak-window-minutes", "abc"}
+                ).build());
+    }
+
+    @Test
+    void testDiagnosticsDirBothSyntaxes() {
+        MonitorConfiguration equal =
+                Main.configureSpringBoot(
+                        MonitorConfiguration.builder(),
+                        new String[] {"--diagnostics-dir=/tmp/jmon"}
+                ).build();
+
+        MonitorConfiguration separate =
+                Main.configureSpringBoot(
+                        MonitorConfiguration.builder(),
+                        new String[] {"--diagnostics-dir", "/tmp/jmon"}
+                ).build();
+
+        assertEquals(java.nio.file.Path.of("/tmp/jmon"),
+                equal.getDiagnosticsDir());
+        assertEquals(java.nio.file.Path.of("/tmp/jmon"),
+                separate.getDiagnosticsDir());
+    }
+
+    @Test
+    void testAnalysisFlagsDefaultWhenAbsent() {
+        MonitorConfiguration config =
+                Main.configureSpringBoot(
+                        MonitorConfiguration.builder(),
+                        new String[] {"--pid", "12345"}
+                ).build();
+
+        assertEquals(Duration.ofMinutes(10),
+                config.getLeakObservationWindow());
+        assertEquals(java.nio.file.Path.of("diagnostics"),
+                config.getDiagnosticsDir());
+    }
 }

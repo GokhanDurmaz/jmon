@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public class SpringBootMetricsPoller implements AutoCloseable {
 
     private final SpringBootMetricsClient client;
-    private final Duration interval;
+    private volatile Duration interval;
     private final AtomicReference<SpringBootMetricsSnapshot> snapshot;
     private final AtomicBoolean polling = new AtomicBoolean(true);
     private volatile Thread thread;
@@ -39,6 +39,12 @@ public class SpringBootMetricsPoller implements AutoCloseable {
         pollerThread.setDaemon(true);
         thread = pollerThread;
         pollerThread.start();
+    }
+
+    public void setPollInterval(Duration interval) {
+        if (interval != null) {
+            this.interval = interval;
+        }
     }
 
     private void pollLoop() {

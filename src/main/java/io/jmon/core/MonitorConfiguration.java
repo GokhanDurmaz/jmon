@@ -1,5 +1,6 @@
 package io.jmon.core;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Optional;
 
@@ -10,6 +11,8 @@ public class MonitorConfiguration {
     private final Optional<String> springBootPassword;
     private final Duration requestTimeout;
     private final Duration connectTimeout;
+    private final Duration leakObservationWindow;
+    private final Path diagnosticsDir;
 
     private MonitorConfiguration(Builder builder) {
         this.refreshInterval = builder.refreshInterval;
@@ -18,6 +21,8 @@ public class MonitorConfiguration {
         this.springBootPassword = builder.springBootPassword;
         this.requestTimeout = builder.requestTimeout;
         this.connectTimeout = builder.connectTimeout;
+        this.leakObservationWindow = builder.leakObservationWindow;
+        this.diagnosticsDir = builder.diagnosticsDir;
     }
 
     public static Builder builder() {
@@ -48,6 +53,14 @@ public class MonitorConfiguration {
         return connectTimeout;
     }
 
+    public Duration getLeakObservationWindow() {
+        return leakObservationWindow;
+    }
+
+    public Path getDiagnosticsDir() {
+        return diagnosticsDir;
+    }
+
     public static class Builder {
         private Duration refreshInterval = Duration.ofSeconds(3);
         private Optional<String> springBootEndpoint = Optional.empty();
@@ -55,6 +68,27 @@ public class MonitorConfiguration {
         private Optional<String> springBootPassword = Optional.empty();
         private Duration requestTimeout = Duration.ofSeconds(10);
         private Duration connectTimeout = Duration.ofSeconds(5);
+        private Duration leakObservationWindow = Duration.ofMinutes(10);
+        private Path diagnosticsDir = Path.of("diagnostics");
+
+        public Builder leakObservationWindow(Duration window) {
+            if (window == null || window.isZero() || window.isNegative()) {
+                throw new IllegalArgumentException(
+                        "leak observation window must be positive");
+            }
+            this.leakObservationWindow = window;
+            return this;
+        }
+
+        public Builder diagnosticsDir(Path diagnosticsDir) {
+            if (diagnosticsDir == null
+                    || diagnosticsDir.toString().isBlank()) {
+                throw new IllegalArgumentException(
+                        "diagnostics directory must not be blank");
+            }
+            this.diagnosticsDir = diagnosticsDir;
+            return this;
+        }
 
         public Builder refreshInterval(Duration refreshInterval) {
             this.refreshInterval = refreshInterval;

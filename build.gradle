@@ -1,6 +1,27 @@
 plugins {
     id 'java'
     id 'application'
+    id 'checkstyle'
+    id 'pmd'
+}
+
+checkstyle {
+    toolVersion = '10.21.4'
+    configFile = file('config/checkstyle/checkstyle.xml')
+    showViolations = true
+}
+
+pmd {
+    toolVersion = '7.9.0'
+    ruleSetFiles = files('config/pmd/pmd-ruleset.xml')
+    ruleSets = []
+    consoleOutput = true
+}
+
+// Checkstyle's ANTLR grammar cannot process JPMS module declarations;
+// module-info.java is excluded from style analysis (documented policy).
+tasks.withType(Checkstyle).configureEach {
+    source = source.matching { exclude '**/module-info.java' }
 }
 
 version = providers.gradleProperty('releaseVersion')

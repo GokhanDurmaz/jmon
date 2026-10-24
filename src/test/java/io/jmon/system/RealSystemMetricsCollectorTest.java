@@ -3,7 +3,6 @@ package io.jmon.system;
 import io.jmon.core.MonitorConfiguration;
 import io.jmon.core.SystemMetrics;
 import org.junit.jupiter.api.Test;
-import org.mockito.MockedStatic;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;

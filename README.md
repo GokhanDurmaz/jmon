@@ -165,6 +165,106 @@ Notes:
   panel shows the connection status while local JVM monitoring continues
   to work.
 
+### Memory leak analysis
+
+Tuning is optional; sane defaults are used otherwise:
+
+```bash
+jmon --pid 12345 --leak-window-minutes 30
+jmon --pid 12345 --diagnostics-dir /var/tmp/jmon-dumps
+```
+
+JMon continuously tracks the monitored JVM's memory behavior and classifies
+it into `INSUFFICIENT DATA`, `NORMAL`, `GROWTH OBSERVED`,
+`POSSIBLE MEMORY LEAK`, and `COLLECTION DEGRADED` states. The analysis
+combines:
+
+- the post-GC heap floor (real values from GC notifications, timestamped at
+  drain time, so they may lag the GC event by up to one refresh cycle),
+- GC pressure (collections per minute and time share from JMX counters,
+  computed only over segments without a counter reset),
+- per-class instance and shallow-heap growth keyed by the **verbatim**
+  histogram class name (never a decoded display label); classes missing from
+  a later histogram are treated as missing data, not zero.
+
+The panel shows the classification, the observation window, valid sample
+counts, the post-GC trend, GC pressure, and up to three leading growing
+classes. `e` opens a detail view with the full explanation and all leading
+classes; `r` resets the analysis baseline explicitly.
+
+Defaults (all deterministic and documented in the source): the observation
+window is 10 minutes (`--leak-window-minutes`, 1-1440), a suspicion requires
+at least 6 valid heap samples and a post-GC trend over at least 4 GC events
+spanning 60 seconds, and the risk threshold is a post-GC slope of at least
+max(512 KiB/min, 0.1% of heap per minute) **corroborated** by a sustained
+class growth of at least 1 MiB or an especially steep slope (2x threshold).
+Hysteresis keeps the flagged state until three consecutive evaluations show
+a slope below half the threshold. Repeated events are deduplicated and
+recovery is recorded.
+
+**Important:** this is a trend detector that identifies suspicious growth.
+It does not prove a permanent leak; retained objects may be legitimate
+lifecycles. Use it as evidence for further investigation.
+
+### Deep diagnostics (heap dumps and JFR)
+
+The `analyze`/leak view never starts anything automatically. Press `d` to
+open the deep diagnostics menu, which requires explicit confirmation:
+
+| Key | Action                                                        |
+|-----|----------------------------------------------------------------|
+| `y` | Generate a heap dump via `jcmd GC.heap_dump`                    |
+| `j` | Start a bounded JFR recording (120 s, `settings=profile`)      |
+| `s` | Stop the active JFR recording early (partial file)             |
+| `x` / any key | Close the menu; `x` also cancels an active operation    |
+
+The menu shows the target PID, the output directory
+(`--diagnostics-dir`, default `./diagnostics`), and the estimated disk use
+(about the committed heap size). Heap dumps can pause the target JVM and
+consume substantial disk space and are refused if the filestore looks too
+small or the destination path already exists; dumps are never overwritten.
+Timeouts are enforced (90 s for dumps, 20 s for JFR commands) and timed-out
+or cancelled operations are reported with any partial artifact.
+
+Known limitations, reported honestly by JMon:
+
+- Retained-size/dominator analysis is **not** bundled: it requires an HPROF
+  parser or external analysis tooling (such as Eclipse MAT or VisualVM) for
+  the generated dump. The dump is an artifact for external analysis.
+- The `jcmd` binary of the JDK running JMon (or on PATH) is used; actual
+  per-target support for `GC.heap_dump`/`JFR` is validated on execution.
+- Class histogram collection (`jcmd GC.class_histogram -all`) is relatively
+  expensive on the target JVM; JMon runs it at a fixed 15 s cadence with a
+  20 s timeout and clearly shows degraded states when it fails.
+
+### Keyboard controls
+
+| Key       | Action                                                    |
+|-----------|-----------------------------------------------------------|
+| `q` / `Q` | Quit JMon                                                  |
+| `h` / `?` | Show or hide the help overlay (monitoring keeps running)   |
+| `+` / `=` | Increase the refresh interval by 1 second                  |
+| `-` / `_` | Decrease the refresh interval by 1 second                  |
+| `j` / Down | Select the next row in OBJECT & CLASS MEMORY              |
+| `k` / Up   | Select the previous row in OBJECT & CLASS MEMORY          |
+| `ENTER` / `o` | Open the detail view of the selected class entry        |
+| `b` / `B`  | Return from a detail view to the dashboard                 |
+| `e`        | Toggle the memory-leak analysis detail view                |
+| `d`        | Open the deep diagnostics confirmation menu                |
+| `r`        | Reset the memory analysis baseline                         |
+
+The class detail view shows the histogram name verbatim (never rewritten or
+guessed), the decoded array and component types for array classes, module
+information when the JVM histogram provides it, instance counts, total and
+average **shallow heap**, and an explicit warning that shallow heap excludes
+referenced and retained objects. Only classes from named `java.*`/`jdk.*`
+modules are labeled as JDK classes; other entries remain unclassified because
+the histogram does not provide reliable identity information for them.
+
+The refresh interval is clamped between 1000 and 60000 ms. The same interval
+drives the Spring Boot Actuator polling when an endpoint is configured.
+A help overlay listing these controls is always available with `h` or `?`.
+
 ### Display version
 
 ```bash
@@ -263,6 +363,15 @@ build\install\jmon\bin\jmon.bat --pid 12345
 ## Development
 
 Development guidelines and project-specific agent instructions are documented in [`CLAUDE.md`](CLAUDE.md) and [`SKILL.md`](SKILL.md).
+
+### Static analysis
+
+JMon uses Gradle's built-in Checkstyle and PMD plugins with small, hand-picked correctness rulesets (no full formatting suites).
+
+- Config: [`config/checkstyle/checkstyle.xml`](config/checkstyle/checkstyle.xml) (plus [`config/checkstyle/suppressions.xml`](config/checkstyle/suppressions.xml) for targeted, justified suppressions) and [`config/pmd/pmd-ruleset.xml`](config/pmd/pmd-ruleset.xml).
+- Commands: `./gradlew checkstyleMain checkstyleTest pmdMain pmdTest` (or just `./gradlew check`, which includes them).
+- Policy: findings on pre-existing code are documented rather than silently refactored; suppressions are per-file/per-line with a written justification, never global. `module-info.java` is excluded because Checkstyle cannot parse JPMS module declarations.
+- Tool versions: Checkstyle 10.21.4, PMD 7.9.0 (see `build.gradle`).
 
 ## License
 

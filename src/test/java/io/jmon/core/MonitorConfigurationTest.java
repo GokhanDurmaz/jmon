@@ -37,4 +37,48 @@ public class MonitorConfigurationTest {
         assertEquals(Optional.of(username), config.getSpringBootUsername());
         assertEquals(Optional.of(password), config.getSpringBootPassword());
     }
+
+    @Test
+    public void testAnalysisDefaults() {
+        MonitorConfiguration config = MonitorConfiguration.builder().build();
+
+        assertEquals(Duration.ofMinutes(10),
+                config.getLeakObservationWindow());
+        assertEquals(java.nio.file.Path.of("diagnostics"),
+                config.getDiagnosticsDir());
+    }
+
+    @Test
+    public void testCustomAnalysisConfiguration() {
+        MonitorConfiguration config = MonitorConfiguration.builder()
+                .leakObservationWindow(Duration.ofMinutes(45))
+                .diagnosticsDir(java.nio.file.Path.of("/tmp/jmon-dumps"))
+                .build();
+
+        assertEquals(Duration.ofMinutes(45),
+                config.getLeakObservationWindow());
+        assertEquals(java.nio.file.Path.of("/tmp/jmon-dumps"),
+                config.getDiagnosticsDir());
+    }
+
+    @Test
+    public void testInvalidObservationWindowRejected() {
+        assertThrows(IllegalArgumentException.class, () ->
+                MonitorConfiguration.builder()
+                        .leakObservationWindow(Duration.ZERO));
+        assertThrows(IllegalArgumentException.class, () ->
+                MonitorConfiguration.builder()
+                        .leakObservationWindow(Duration.ofSeconds(-5)));
+        assertThrows(IllegalArgumentException.class, () ->
+                MonitorConfiguration.builder().leakObservationWindow(null));
+    }
+
+    @Test
+    public void testBlankDiagnosticsDirRejected() {
+        assertThrows(IllegalArgumentException.class, () ->
+                MonitorConfiguration.builder()
+                        .diagnosticsDir(java.nio.file.Path.of("")));
+        assertThrows(IllegalArgumentException.class, () ->
+                MonitorConfiguration.builder().diagnosticsDir(null));
+    }
 }
