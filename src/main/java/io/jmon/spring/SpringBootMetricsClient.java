@@ -9,9 +9,9 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
-import java.util.Map;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -48,7 +48,7 @@ public class SpringBootMetricsClient {
     public CompletableFuture<SpringBootMetricsSnapshot> fetchMetrics() {
         String baseUrl = config.getSpringBootEndpoint()
                 .orElseThrow(() -> new RuntimeException("No Spring Boot endpoint configured"));
-        String url = baseUrl + "/actuator/metrics";
+        String url = normalizedBaseUrl(baseUrl) + "/actuator/metrics";
 
         HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                 .uri(URI.create(url))
@@ -74,30 +74,63 @@ public class SpringBootMetricsClient {
             }
 
             try {
-                JsonNode root = objectMapper.readTree(response.body());
-                JsonNode metricsNode = root.get("metrics");
+                JsonNode namesNode =
+                        objectMapper.readTree(response.body()).get("names");
+
+                if (namesNode == null || !namesNode.isArray()) {
+                    return new SpringBootMetricsSnapshot(
+                            List.of(),
+                            ProviderStatus.ERROR,
+                            "Unexpected metrics index response: "
+                                    + "'names' array is missing"
+                    );
+                }
 
                 List<SpringBootMetric> metrics = new ArrayList<>();
-                if (metricsNode != null && metricsNode.isArray()) {
-                    for (JsonNode node : metricsNode) {
-                        metrics.add(new SpringBootMetric(
-                                node.get("name").asText(),
-                                node.get("value").asDouble(),
-                                node.get("unit").asText(),
-                                node.get("description").asText()
-                        ));
-                    }
+                for (JsonNode nameNode : namesNode) {
+                    metrics.add(new SpringBootMetric(
+                            nameNode.asText(),
+                            null,
+                            "",
+                            ""
+                    ));
                 }
 
                 return new SpringBootMetricsSnapshot(metrics, ProviderStatus.SUCCESS, null);
             } catch (Exception e) {
-                return new SpringBootMetricsSnapshot(List.of(), ProviderStatus.ERROR, e.getMessage());
+                return new SpringBootMetricsSnapshot(
+                        List.of(),
+                        ProviderStatus.ERROR,
+                        describe(e)
+                );
             }
         }).exceptionally(ex -> {
-            String message = (ex instanceof java.util.concurrent.CompletionException && ex.getCause() != null)
-                    ? ex.getCause().getMessage() : (ex != null ? ex.getMessage() : "Unknown error");
+            String message = describe(ex);
+
             return new SpringBootMetricsSnapshot(List.of(), ProviderStatus.ERROR, message);
         });
+    }
+
+    private String describe(Throwable throwable) {
+        Throwable cause = throwable;
+
+        if (cause instanceof CompletionException && cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+
+        if (cause.getMessage() == null || cause.getMessage().isBlank()) {
+            return cause.getClass().getSimpleName();
+        }
+
+        return cause.getMessage();
+    }
+
+    private String normalizedBaseUrl(String baseUrl) {
+        while (baseUrl.endsWith("/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        }
+
+        return baseUrl;
     }
 
     public CompletableFuture<SpringBootMetricsSnapshot> fetchJvmMetrics() {
@@ -116,7 +149,7 @@ public class SpringBootMetricsClient {
                     .toList();
 
             if (availableTargetMetrics.isEmpty()) {
-                return CompletableFuture.completedFuture(new SpringBootMetricsSnapshot(snapshot.metrics(), ProviderStatus.SUCCESS, null));
+                return CompletableFuture.completedFuture(new SpringBootMetricsSnapshot(List.of(), ProviderStatus.SUCCESS, null));
             }
 
             List<CompletableFuture<SpringBootMetric>> futures = new ArrayList<>();
@@ -139,7 +172,7 @@ public class SpringBootMetricsClient {
     }
 
     private CompletableFuture<SpringBootMetric> fetchSingleMetric(String baseUrl, String metricName) {
-        String url = baseUrl + "/actuator/metrics/" + metricName;
+        String url = normalizedBaseUrl(baseUrl) + "/actuator/metrics/" + metricName;
 
         HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                 .uri(URI.create(url))
@@ -160,13 +193,19 @@ public class SpringBootMetricsClient {
             if (response.statusCode() == 200) {
                 try {
                     JsonNode root = objectMapper.readTree(response.body());
-                    JsonNode node = root.get("metrics");
-                    if (node != null) {
+                    JsonNode measurements = root.get("measurements");
+
+                    if (measurements != null
+                            && measurements.isArray()
+                            && measurements.size() > 0) {
+
+                        JsonNode valueNode = measurementWithValue(measurements);
+
                         return new SpringBootMetric(
                                 metricName,
-                                node.get("value").asDouble(),
-                                node.get("unit").asText(),
-                                node.get("description").asText()
+                                valueNode.get("value").asDouble(),
+                                unit(root),
+                                textValue(root, "description")
                         );
                     }
                 } catch (Exception e) {
@@ -175,5 +214,30 @@ public class SpringBootMetricsClient {
             }
             return null;
         }).exceptionally(ex -> null);
+    }
+
+    private JsonNode measurementWithValue(JsonNode measurements) {
+        for (JsonNode measurement : measurements) {
+            if ("VALUE".equalsIgnoreCase(
+                    measurement.path("statistic").asText())) {
+                return measurement;
+            }
+        }
+
+        return measurements.get(0);
+    }
+
+    private String unit(JsonNode root) {
+        String baseUnit = textValue(root, "baseUnit");
+
+        return baseUnit.isEmpty() ? textValue(root, "unit") : baseUnit;
+    }
+
+    private String textValue(JsonNode root, String field) {
+        JsonNode fieldNode = root.get(field);
+
+        return (fieldNode != null && fieldNode.isTextual())
+                ? fieldNode.asText()
+                : "";
     }
 }

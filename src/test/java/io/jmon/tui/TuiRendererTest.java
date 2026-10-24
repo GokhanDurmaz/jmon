@@ -62,7 +62,7 @@ class TuiRendererTest {
 
         for (double cpu : cpuSamples) {
             renderer.render(mockTerminal, mockSystem, mockProcess, mockJvm, mockHealth, 
-                             "Status", List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0);
+                             "Status", List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0, Optional.empty());
         }
 
         String output = stringWriter.toString();
@@ -99,7 +99,7 @@ class TuiRendererTest {
         when(mockHealth.alerts()).thenReturn(Collections.emptyList());
 
         renderer.render(mockTerminal, mockSystem, mockProcess, mockJvm, mockHealth, 
-                         "Status", List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0);
+                         "Status", List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0, Optional.empty());
 
         String output = stringWriter.toString();
         assertTrue(output.contains("Waiting for samples..."), "Should show waiting message for empty history");
@@ -140,7 +140,7 @@ class TuiRendererTest {
             when(mockSystem.getTotalMemory()).thenReturn(Optional.of(1000000L));
             when(mockSystem.getFreeMemory()).thenReturn(Optional.of((long) (1000000L * (1 - ram / 100.0))));
             renderer.render(mockTerminal, mockSystem, mockProcess, mockJvm, mockHealth, 
-                             "Status", List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0);
+                             "Status", List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0, Optional.empty());
         }
 
         String output = stringWriter.toString();
@@ -180,7 +180,7 @@ class TuiRendererTest {
         for (double heap : heapPercents) {
             when(mockJvm.heapUsed()).thenReturn((long) (1000 * heap / 100.0));
             renderer.render(mockTerminal, mockSystem, mockProcess, mockJvm, mockHealth, 
-                             "Status", List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0);
+                             "Status", List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0, Optional.empty());
         }
 
         String output = stringWriter.toString();
@@ -217,9 +217,166 @@ class TuiRendererTest {
         when(mockHealth.alerts()).thenReturn(Collections.emptyList());
 
         renderer.render(mockTerminal, mockSystem, mockProcess, mockJvm, mockHealth, 
-                         "Status", List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0);
+                         "Status", List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0, Optional.empty());
 
         assertTrue(true);
+    }
+
+    @Test
+    @DisplayName("Spring Boot metrics: panel shows metric name, value and unit")
+    void testSpringBootMetricsPanel() {
+        SpringBootMetricsSnapshot snapshot = new SpringBootMetricsSnapshot(
+                List.of(
+                        new SpringBootMetric(
+                                "jvm.memory.used", 512.5, "bytes",
+                                "The amount of used memory"),
+                        new SpringBootMetric(
+                                "jvm.threads.live", 30.0, "", "")
+                ),
+                ProviderStatus.SUCCESS,
+                null
+        );
+
+        renderer.render(mockTerminal, systemDefaults(), processDefaults(),
+                jvmDefaults(), healthOk(), "Status", List.of(), 0L, 1000L,
+                "Leak", "Detail", 0.0, 0.0, Optional.of(snapshot));
+
+        renderer.render(mockTerminal, systemDefaults(), processDefaults(),
+                jvmDefaults(), healthOk(), "Status", List.of(), 0L, 1000L,
+                "Leak", "Detail", 0.0, 0.0, Optional.empty());
+
+        String output = stringWriter.toString();
+        assertTrue(output.contains("SPRING BOOT METRICS"), "Should show the Spring Boot panel");
+        assertTrue(output.contains("jvm.memory.used"), "Should show metric name");
+        assertTrue(output.contains("512.50 bytes"), "Should show value with unit");
+        assertTrue(output.contains("jvm.threads.live"), "Should show second metric");
+        assertTrue(output.contains("30.00"), "Should show value without unit");
+    }
+
+    @Test
+    @DisplayName("Spring Boot metrics: fetching state is shown before first sample")
+    void testSpringBootMetricsFetchingState() {
+        renderer.render(mockTerminal, systemDefaults(), processDefaults(),
+                jvmDefaults(), healthOk(), "Status", List.of(), 0L, 1000L,
+                "Leak", "Detail", 0.0, 0.0, Optional.of(
+                        new SpringBootMetricsSnapshot(
+                                List.of(),
+                                ProviderStatus.UNAVAILABLE,
+                                null
+                        )));
+
+        String output = stringWriter.toString();
+        assertTrue(output.contains("SPRING BOOT METRICS"));
+        assertTrue(output.contains("Fetching Spring Boot metrics..."));
+    }
+
+    @Test
+    @DisplayName("Spring Boot metrics: connection error is shown with message")
+    void testSpringBootMetricsErrorState() {
+        renderer.render(mockTerminal, systemDefaults(), processDefaults(),
+                jvmDefaults(), healthOk(), "Status", List.of(), 0L, 1000L,
+                "Leak", "Detail", 0.0, 0.0, Optional.of(
+                        new SpringBootMetricsSnapshot(
+                                List.of(),
+                                ProviderStatus.ERROR,
+                                "Connection refused"
+                        )));
+
+        String output = stringWriter.toString();
+        assertTrue(output.contains("ERROR"));
+        assertTrue(output.contains("Connection refused"));
+    }
+
+    @Test
+    @DisplayName("Spring Boot metrics: permission denied is shown with guidance")
+    void testSpringBootMetricsPermissionDeniedState() {
+        renderer.render(mockTerminal, systemDefaults(), processDefaults(),
+                jvmDefaults(), healthOk(), "Status", List.of(), 0L, 1000L,
+                "Leak", "Detail", 0.0, 0.0, Optional.of(
+                        new SpringBootMetricsSnapshot(
+                                List.of(),
+                                ProviderStatus.PERMISSION_DENIED,
+                                "HTTP 401"
+                        )));
+
+        String output = stringWriter.toString();
+        assertTrue(output.contains("PERMISSION DENIED"));
+        assertTrue(output.contains("HTTP 401"));
+        assertTrue(output.contains("authentication"));
+    }
+
+    @Test
+    @DisplayName("Spring Boot metrics: empty success shows availability note")
+    void testSpringBootMetricsEmptySuccessState() {
+        renderer.render(mockTerminal, systemDefaults(), processDefaults(),
+                jvmDefaults(), healthOk(), "Status", List.of(), 0L, 1000L,
+                "Leak", "Detail", 0.0, 0.0, Optional.of(
+                        new SpringBootMetricsSnapshot(
+                                List.of(),
+                                ProviderStatus.SUCCESS,
+                                null
+                        )));
+
+        assertTrue(stringWriter.toString().contains("No matching JVM metrics"));
+    }
+
+    @Test
+    @DisplayName("Spring Boot metrics: panel is hidden when actuator is not configured")
+    void testSpringBootMetricsPanelHiddenWhenNotConfigured() {
+        TuiRenderer freshRenderer = new TuiRenderer();
+        StringWriter freshWriter = new StringWriter();
+        PrintWriter freshPrintWriter = new PrintWriter(freshWriter);
+        Terminal freshTerminal = mock(Terminal.class);
+        when(freshTerminal.getWidth()).thenReturn(100);
+        when(freshTerminal.writer()).thenReturn(freshPrintWriter);
+
+        freshRenderer.render(freshTerminal, systemDefaults(), processDefaults(),
+                jvmDefaults(), healthOk(), "Status", List.of(), 0L, 1000L,
+                "Leak", "Detail", 0.0, 0.0, Optional.empty());
+
+        assertFalse(
+                freshWriter.toString().contains("SPRING BOOT METRICS"),
+                "Spring Boot panel must not appear without configuration"
+        );
+    }
+
+    private SystemMetrics systemDefaults() {
+        SystemMetrics mock = mock(SystemMetrics.class);
+        when(mock.getCpuUtilization()).thenReturn(Optional.of(0.0));
+        when(mock.getTotalMemory()).thenReturn(Optional.of(1000000L));
+        when(mock.getFreeMemory()).thenReturn(Optional.of(800000L));
+        return mock;
+    }
+
+    private ProcessMetrics processDefaults() {
+        ProcessMetrics mock = mock(ProcessMetrics.class);
+        when(mock.getCpuUtilization()).thenReturn(0.0);
+        when(mock.getMemory()).thenReturn(1024L);
+        return mock;
+    }
+
+    private JvmMetrics jvmDefaults() {
+        JvmMetrics mock = mock(JvmMetrics.class);
+        when(mock.heapUsed()).thenReturn(512L);
+        when(mock.heapMax()).thenReturn(1024L);
+        when(mock.heapCommitted()).thenReturn(512L);
+        when(mock.nonHeapUsed()).thenReturn(128L);
+        when(mock.javaVersion()).thenReturn("17");
+        when(mock.runtimeName()).thenReturn("OpenJDK");
+        when(mock.threadCount()).thenReturn(10);
+        when(mock.peakThreadCount()).thenReturn(15);
+        when(mock.gcCount()).thenReturn(5L);
+        when(mock.gcTimeMillis()).thenReturn(100L);
+        when(mock.loadedClassCount()).thenReturn(1000);
+        when(mock.uptimeMillis()).thenReturn(10000L);
+        return mock;
+    }
+
+    private HealthReport healthOk() {
+        HealthReport mock = mock(HealthReport.class);
+        when(mock.status()).thenReturn(HealthStatus.OK);
+        when(mock.alerts()).thenReturn(Collections.emptyList());
+        return mock;
     }
 
     private String percent(double value) {

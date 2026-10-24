@@ -141,6 +141,30 @@ jps -l
 
 `jps` is included with the JDK.
 
+### Monitor a Spring Boot application through Actuator
+
+Spring Boot Actuator monitoring is optional. Pass an Actuator metrics
+endpoint and, if required, the HTTP basic auth credentials:
+
+```bash
+jmon --pid 12345 --spring-endpoint http://localhost:8080
+jmon --pid 12345 --spring-endpoint http://localhost:8080 --spring-user actuator --spring-password actuator
+```
+
+Notes:
+
+- The application must expose `GET /actuator/metrics`; no other sensitive
+  Actuator endpoint is required.
+- JVM metrics matching metrics such as `jvm.memory.used` are collected only
+  if they are exposed by the target application.
+- Metric values are requested without tag filters, so Spring Boot aggregates
+  them across every tag dimension. For example, `jvm.memory.used` combines
+  the `heap` and non-heap memory areas. Tag-based breakdowns are a possible
+  future feature.
+- If authentication fails or the endpoint is unavailable, the Spring Boot
+  panel shows the connection status while local JVM monitoring continues
+  to work.
+
 ### Display version
 
 ```bash

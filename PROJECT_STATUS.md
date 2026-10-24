@@ -1,1 +1,8 @@
 TEST CONTENT
+
+## Session record — 2026-10-24 (live Actuator verification)
+- Goal: verify Spring Boot Actuator integration end-to-end against a real local Spring Boot 4.1.0 app (temp project at /var/folders/nz/hq3kwlh16rz3zwc4qd5xk6c40000gn/T/opencode/spring-live, now deleted).
+- Verified live: open-mode (200 + real metric JSON; client → poller → TuiRenderer collected/rendered 5 live metrics), secured-mode (401 → PERMISSION_DENIED "HTTP 401"; actuator/secret → SUCCESS + live values), and the real TUI via `build/install/jmon/bin/jmon --pid <liveAppPid> --spring-endpoint ...` under a pty: SPRING BOOT METRICS panel polled live authenticated values (jvm.memory.used increasing per refresh) and showed PERMISSION DENIED / HTTP 401 without credentials. Boot 4.1 exposes 5 JVM metric names (no jvm.gc.count/jvm.gc.time); JMon collected only what was available.
+- Cleanup: temp app killed/removed, both temporary fixture tests (LiveActuatorOpenModeTest, LiveActuatorSecuredModeTest) deleted. Note: `gradlew run` executes inside the daemon without a pty (jline falls back to dumb terminal) — use `./gradlew installDist` and run `build/install/jmon/bin/jmon` for real TUI testing.
+- Final state: full suite rerun clean — 51 tests, 0 failures/errors. Tree status unchanged from before the task (same modified files + untracked WORKSPACE_EDIT_TEST.md preserved).
+- Next concrete task: review the pre-existing uncommitted integration changes (Main, SpringBootMetricsClient, Tui, TuiRenderer, SpringBootMetricsPoller + tests) and commit them; optionally document the Spring Boot CLI flags in the README keyboard/help section.

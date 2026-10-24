@@ -148,7 +148,8 @@ public class TuiRenderer {
             String leakStatus,
             String leakDetails,
             double leakHeapUsed,
-            double leakHeapMax) {
+            double leakHeapMax,
+            Optional<SpringBootMetricsSnapshot> springMetrics) {
 
 
         int terminalWidth = Math.max(60, terminal.getWidth());
@@ -302,6 +303,14 @@ public class TuiRenderer {
             screen.append(line).append('\n');
         }
 
+        if (springMetrics.isPresent()) {
+            appendSpringBootMetrics(
+                    screen,
+                    springMetrics.get(),
+                    innerWidth
+            );
+        }
+
         // MEMORY LEAK ANALYSIS PANEL
 
         List<String> leakLines = new ArrayList<>();
@@ -390,6 +399,77 @@ public class TuiRenderer {
 
         terminal.writer().print(screen);
         terminal.flush();
+    }
+
+    private void appendSpringBootMetrics(
+            StringBuilder screen,
+            SpringBootMetricsSnapshot snapshot,
+            int width) {
+
+        List<String> springLines = new ArrayList<>();
+        String cause = shorten(
+                snapshot.errorMessage() == null
+                        ? ""
+                        : snapshot.errorMessage(),
+                Math.max(10, width - 10)
+        );
+
+        switch (snapshot.status()) {
+            case SUCCESS -> {
+                if (snapshot.metrics().isEmpty()) {
+                    springLines.add(DIM + "No matching JVM metrics exposed by Actuator." + RESET);
+                } else {
+                    int shown = 0;
+
+                    for (SpringBootMetric metric : snapshot.metrics()) {
+                        if (shown >= 12) {
+                            springLines.add(
+                                    DIM + "… and " + (snapshot.metrics().size() - shown)
+                                            + " more metrics" + RESET
+                            );
+                            break;
+                        }
+
+                        springLines.add(String.format(
+                                Locale.ROOT,
+                                "%-34s %20s",
+                                shorten(metric.name(), 34),
+                                formatMetricValue(metric)
+                        ));
+                        shown++;
+                    }
+                }
+            }
+            case UNAVAILABLE ->
+                    springLines.add(DIM + "Fetching Spring Boot metrics..." + RESET);
+            case PERMISSION_DENIED -> {
+                springLines.add(RED + BOLD + "PERMISSION DENIED" + RESET);
+                springLines.add(cause);
+                springLines.add(
+                        DIM + "Check the endpoint's authentication settings." + RESET
+                );
+            }
+            case ERROR -> {
+                springLines.add(RED + BOLD + "ERROR" + RESET);
+                springLines.add(cause);
+            }
+        }
+
+        for (String line : buildPanel("SPRING BOOT METRICS", springLines, width)) {
+            screen.append(line).append('\n');
+        }
+    }
+
+    private String formatMetricValue(SpringBootMetric metric) {
+        if (metric.value() == null) {
+            return "N/A";
+        }
+
+        String value = String.format(Locale.ROOT, "%,.2f", metric.value());
+
+        return (metric.unit() == null || metric.unit().isEmpty())
+                ? value
+                : value + " " + metric.unit();
     }
 
     private List<String> buildPanel(

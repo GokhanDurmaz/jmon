@@ -5,7 +5,10 @@ import io.jmon.core.HealthReport;
 import io.jmon.core.JvmMetrics;
 import io.jmon.core.MonitorConfiguration;
 import io.jmon.core.ProcessMetrics;
+import io.jmon.core.ProviderStatus;
+import io.jmon.core.SpringBootMetricsSnapshot;
 import io.jmon.core.SystemMetrics;
+import io.jmon.spring.SpringBootMetricsClient;
 import io.jmon.system.*;
 
 import org.jline.terminal.Attributes;
@@ -19,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -33,6 +37,8 @@ public class Tui {
     private final MemoryLeakDetector memoryLeakDetector;
     private final HealthEvaluator healthEvaluator;
     private final TuiRenderer renderer;
+    private final SpringBootMetricsClient springBootClient;
+    private SpringBootMetricsPoller springBootPoller;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final Object shutdownLock = new Object();
 
@@ -42,7 +48,8 @@ public class Tui {
             ClassHistogramCollector classHistogramCollector,
             MemoryLeakDetector memoryLeakDetector,
             HealthEvaluator healthEvaluator,
-            TuiRenderer renderer) {
+            TuiRenderer renderer,
+            SpringBootMetricsClient springBootClient) {
         this.config = config;
         this.targetPid = targetPid;
         this.systemCollector = systemCollector;
@@ -51,9 +58,12 @@ public class Tui {
         this.memoryLeakDetector = memoryLeakDetector;
         this.renderer = renderer;
         this.healthEvaluator = healthEvaluator;
+        this.springBootClient = springBootClient;
     }
 
     public void start() {
+        springBootPoller = null;
+
         AtomicReference<String> classMemoryStatus = new AtomicReference<>("");
         AtomicReference<List<ClassHistogramCollector.ClassMemoryStat>> classMemoryStats = new AtomicReference<>(new ArrayList<>());
         AtomicLong histogramSampleId = new AtomicLong(0);
@@ -144,6 +154,25 @@ public class Tui {
                 histogramThread.setDaemon(true);
                 histogramThread.start();
 
+                AtomicReference<SpringBootMetricsSnapshot> springSnapshot =
+                        new AtomicReference<>();
+
+                if (springBootClient != null) {
+                    springSnapshot.set(new SpringBootMetricsSnapshot(
+                            List.of(),
+                            ProviderStatus.UNAVAILABLE,
+                            null
+                    ));
+
+                    springBootPoller = new SpringBootMetricsPoller(
+                            springBootClient,
+                            config.getRefreshInterval(),
+                            springSnapshot
+                    );
+
+                    springBootPoller.start();
+                }
+
                 while (running.get()) {
                     SystemMetrics system =
                             systemCollector.collectMetrics(config);
@@ -173,7 +202,8 @@ public class Tui {
                                            memoryLeakDetector.status(),
                                            memoryLeakDetector.details(),
                                            memoryLeakDetector.currentHeapUsed(),
-                                           memoryLeakDetector.currentHeapMax());
+                                           memoryLeakDetector.currentHeapMax(),
+                                           Optional.ofNullable(springSnapshot.get()));
 
 
 
@@ -202,6 +232,10 @@ public class Tui {
 
                 synchronized (shutdownLock) {
                     shutdownLock.notifyAll();
+                }
+
+                if (springBootPoller != null) {
+                    springBootPoller.stop();
                 }
 
                 terminal.trackMouse(Terminal.MouseTracking.Off);
