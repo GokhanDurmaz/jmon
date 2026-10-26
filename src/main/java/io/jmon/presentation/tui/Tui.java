@@ -8,6 +8,7 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.LongSupplier;
 
 import org.jline.terminal.Attributes;
 import org.jline.terminal.Terminal;
@@ -23,6 +24,7 @@ import io.jmon.application.port.out.JvmSession;
 import io.jmon.application.port.out.SpringBootMetricsClient;
 import io.jmon.application.port.out.SystemMetricsCollector;
 import io.jmon.application.port.out.TargetProcessCollector;
+import io.jmon.common.constants.TimeConstants;
 import io.jmon.domain.diagnostics.DiagnosticOutcome;
 import io.jmon.domain.health.HealthEvaluator;
 import io.jmon.domain.health.HealthReport;
@@ -90,7 +92,6 @@ public class Tui {
     private volatile long lastKnownHeapCommitted = NO_HEAP_BASELINE;
     private volatile String diagnosticsStatus = "";
     private volatile DiagnosticOutcome lastDiagnosticOutcome;
-    private volatile AnalysisResult latestAnalysis;
 
     static final int KEY_UP = 1000;
     static final int KEY_DOWN = 1001;
@@ -212,111 +213,9 @@ public class Tui {
                     springBootPoller.start();
                 }
 
-                while (running.get()) {
-                    SystemMetrics system =
-                            systemCollector.collectMetrics(config);
-
-                    try {
-                        ProcessMetrics process =
-                                processCollector.collect(targetPid);
-
-                        JvmMetrics jvm = jvmSession.collectJvmMetrics();
-
-                        memoryAnalyzer.recordMemorySample(
-                                targetPid,
-                                jvm.heapUsed(),
-                                jvm.heapCommitted(),
-                                jvm.heapMax(),
-                                jvm.gcCount(),
-                                jvm.gcTimeMillis(),
-                                null
-                        );
-
-                        for (long postGcHeap
-                                : jvmSession.drainPostGcHeapSamples()) {
-                            memoryAnalyzer.recordPostGcHeap(postGcHeap);
-                        }
-
-                        memoryAnalyzer.recordClasses(
-                                classMemoryStats.get(),
-                                histogramSampleId.get()
-                        );
-
-                        AnalysisResult analysis = memoryAnalyzer.analyze();
-                        latestAnalysis = analysis;
-                        lastKnownHeapCommitted = jvm.heapCommitted();
-
-                        HealthReport health =
-                                healthEvaluator.evaluate(system, process, jvm);
-
-                        if (helpActive) {
-                            renderer.updateHistory(system, process, jvm);
-                            renderer.renderHelp(terminal);
-                        } else if (classDetailOpen) {
-                            renderer.updateHistory(system, process, jvm);
-                            renderer.renderClassDetail(
-                                    terminal,
-                                    resolveSelectedClassStat(classMemoryStats),
-                                    refreshMillis
-                            );
-                        } else if (analysisDetailOpen) {
-                            renderer.updateHistory(system, process, jvm);
-                            renderer.setLeakAnalysis(latestAnalysis);
-                            renderer.setLeakEvents(
-                                    memoryAnalyzer.events());
-                            renderer.renderLeakDetail(terminal, refreshMillis);
-                        } else if (diagnosticsMenuOpen
-                                && diagnostics != null) {
-                            renderer.updateHistory(system, process, jvm);
-                            renderer.setLeakAnalysis(latestAnalysis);
-                            renderer.renderDiagnosticsMenu(
-                                    terminal,
-                                    targetPid,
-                                    diagnostics.outputDirectory().toString(),
-                                    lastKnownHeapCommitted,
-                                    diagnostics.capabilities(),
-                                    diagnosticsStatus,
-                                    lastDiagnosticOutcome,
-                                    diagnosticsBusy
-                            );
-                        } else {
-                            renderer.setClassSelection(classSelection);
-                            renderer.setLeakAnalysis(analysis);
-                            renderer.setLeakEvents(
-                                    memoryAnalyzer.events());
-                            renderer.render(terminal, system, process, jvm,
-                                    health, classMemoryStatus.get(),
-                                    classMemoryStats.get(), histogramSampleId.get(),
-                                               refreshMillis,
-                                               analysis.state().name().replace('_', ' '),
-                                               analysis.reason(),
-                                               jvm.heapUsed(),
-                                               jvm.heapMax(),
-                                               Optional.ofNullable(springSnapshot.get()));
-                        }
-
-                    } catch (Exception e) {
-                        memoryAnalyzer.recordCollectionProblem(
-                                e.getClass().getSimpleName());
-                        renderer.renderDisconnected(terminal, system, targetPid, e);
-                    }
-
-                    synchronized (shutdownLock) {
-                        if (!running.get()) {
-                            break;
-                        }
-
-                        try {
-                            shutdownLock.wait(Math.max(
-                                    1, // magic-exempt: intrinsic zero/one arithmetic operand
-                                    refreshMillis
-                            ));
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                            break;
-                        }
-                    }
-                }
+                runLoop(terminal, jvmSession, springSnapshot,
+                        classMemoryStatus, classMemoryStats,
+                        histogramSampleId);
             } finally {
                 running.set(false);
 
@@ -465,7 +364,6 @@ public class Tui {
                 if (memoryAnalyzer != null) {
                     memoryAnalyzer.resetBaseline("Manual baseline reset");
                 }
-                latestAnalysis = null;
                 diagnosticsStatus = "Baseline reset";
                 wakeRenderer();
                 return false;
@@ -574,6 +472,204 @@ public class Tui {
         worker.setDaemon(true);
         worker.start();
         wakeRenderer();
+    }
+
+    /**
+     * Runs the render/collection loop. Collection is gated on the refresh
+     * interval: wake-ups that arrive before the interval has fully elapsed
+     * (e.g. keyboard input or completed diagnostics tasks) only redraw the
+     * last collected snapshot and never start a new collection cycle or
+     * append graph history samples.
+     */
+    void runLoop(Terminal terminal, JvmSession jvmSession,
+            AtomicReference<SpringBootMetricsSnapshot> springSnapshot,
+            AtomicReference<String> classMemoryStatus,
+            AtomicReference<List<ClassMemoryStat>> classMemoryStats,
+            AtomicLong histogramSampleId) {
+
+        runLoop(terminal, jvmSession, springSnapshot,
+                classMemoryStatus, classMemoryStats, histogramSampleId,
+                new CollectionGate());
+    }
+
+    /** Gate-injection variant used by tests for deterministic scheduling. */
+    void runLoop(Terminal terminal, JvmSession jvmSession,
+            AtomicReference<SpringBootMetricsSnapshot> springSnapshot,
+            AtomicReference<String> classMemoryStatus,
+            AtomicReference<List<ClassMemoryStat>> classMemoryStats,
+            AtomicLong histogramSampleId,
+            CollectionGate collectionGate) {
+
+        running.set(true);
+        refreshMillis = clampInterval(config.getRefreshInterval().toMillis());
+
+        SystemMetrics system = null;
+        ProcessMetrics process = null;
+        JvmMetrics jvm = null;
+        AnalysisResult analysis = null;
+        HealthReport health = null;
+        Exception lastCollectionError = null;
+
+        while (running.get()) {
+            if (collectionGate.isCollectionDue(refreshMillis)) {
+                system = systemCollector.collectMetrics(config);
+
+                try {
+                    process = processCollector.collect(targetPid);
+
+                    jvm = jvmSession.collectJvmMetrics();
+
+                    memoryAnalyzer.recordMemorySample(
+                            targetPid,
+                            jvm.heapUsed(),
+                            jvm.heapCommitted(),
+                            jvm.heapMax(),
+                            jvm.gcCount(),
+                            jvm.gcTimeMillis(),
+                            null
+                    );
+
+                    for (long postGcHeap
+                            : jvmSession.drainPostGcHeapSamples()) {
+                        memoryAnalyzer.recordPostGcHeap(postGcHeap);
+                    }
+
+                    memoryAnalyzer.recordClasses(
+                            classMemoryStats.get(),
+                            histogramSampleId.get()
+                    );
+
+                    analysis = memoryAnalyzer.analyze();
+                    lastKnownHeapCommitted = jvm.heapCommitted();
+
+                    health = healthEvaluator.evaluate(system, process, jvm);
+
+                    lastCollectionError = null;
+
+                    renderer.updateHistory(system, process, jvm);
+                } catch (Exception e) {
+                    memoryAnalyzer.recordCollectionProblem(
+                            e.getClass().getSimpleName());
+                    lastCollectionError = e;
+                }
+
+                collectionGate.recordCollection();
+            }
+
+            if (!running.get()) {
+                break;
+            }
+
+            if (lastCollectionError != null) {
+                renderer.renderDisconnected(
+                        terminal, system, targetPid, lastCollectionError);
+            } else if (helpActive) {
+                renderer.renderHelp(terminal);
+            } else if (classDetailOpen) {
+                renderer.renderClassDetail(
+                        terminal,
+                        resolveSelectedClassStat(classMemoryStats),
+                        refreshMillis
+                );
+            } else if (analysisDetailOpen) {
+                renderer.setLeakAnalysis(analysis);
+                renderer.setLeakEvents(memoryAnalyzer.events());
+                renderer.renderLeakDetail(terminal, refreshMillis);
+            } else if (diagnosticsMenuOpen && diagnostics != null) {
+                renderer.setLeakAnalysis(analysis);
+                renderer.renderDiagnosticsMenu(
+                        terminal,
+                        targetPid,
+                        diagnostics.outputDirectory().toString(),
+                        lastKnownHeapCommitted,
+                        diagnostics.capabilities(),
+                        diagnosticsStatus,
+                        lastDiagnosticOutcome,
+                        diagnosticsBusy
+                );
+            } else {
+                renderer.setClassSelection(classSelection);
+                renderer.setLeakAnalysis(analysis);
+                renderer.setLeakEvents(memoryAnalyzer.events());
+                renderer.render(terminal, system, process, jvm,
+                        health, classMemoryStatus.get(),
+                        classMemoryStats.get(), histogramSampleId.get(),
+                        refreshMillis,
+                        analysis.state().name().replace('_', ' '),
+                        analysis.reason(),
+                        jvm.heapUsed(),
+                        jvm.heapMax(),
+                        Optional.ofNullable(springSnapshot.get()));
+            }
+
+            synchronized (shutdownLock) {
+                if (!running.get()) {
+                    break;
+                }
+
+                try {
+                    shutdownLock.wait(
+                            collectionGate.remainingWaitMillis(refreshMillis));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+    }
+
+    /**
+     * Gates collection cycles on the refresh interval. Early wake-ups from
+     * the render wait cannot be distinguished from interval expiry by the
+     * monitor alone, so this gate decides explicitly whether the elapsed
+     * time since the last completed collection cycle makes a new
+     * collection due.
+     */
+    static final class CollectionGate {
+
+        /** Sentinel meaning "no collection cycle completed yet". */
+        private static final long FIRST_COLLECTION_SENTINEL = Long.MIN_VALUE;
+
+        private final LongSupplier clock;
+        private long lastCollectionNanos = FIRST_COLLECTION_SENTINEL;
+
+        CollectionGate() {
+            this(System::nanoTime);
+        }
+
+        CollectionGate(LongSupplier clock) {
+            this.clock = clock;
+        }
+
+        /** Never true before the interval has fully elapsed. */
+        boolean isCollectionDue(long refreshIntervalMillis) {
+            if (lastCollectionNanos == FIRST_COLLECTION_SENTINEL) {
+                return true;
+            }
+
+            return clock.getAsLong() - lastCollectionNanos
+                    >= refreshIntervalMillis * TimeConstants.MILLIS_TO_NANOS;
+        }
+
+        void recordCollection() {
+            lastCollectionNanos = clock.getAsLong();
+        }
+
+        /** Bounded wait time until the next collection is due. */
+        long remainingWaitMillis(long refreshIntervalMillis) {
+            if (lastCollectionNanos == FIRST_COLLECTION_SENTINEL) {
+                return 1; // magic-exempt: minimal wait keeps the loop responsive
+            }
+
+            long deadline = lastCollectionNanos
+                    + refreshIntervalMillis * TimeConstants.MILLIS_TO_NANOS;
+            long remaining = (deadline - clock.getAsLong())
+                    / TimeConstants.MILLIS_TO_NANOS;
+
+            return Math.max(
+                    1, // magic-exempt: intrinsic zero/one arithmetic operand
+                    remaining);
+        }
     }
 
     int classSelectionIndex() {

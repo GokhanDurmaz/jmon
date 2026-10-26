@@ -127,3 +127,26 @@ TEST CONTENT
   constructor cleanups. Fixed now: HealthEvaluator.checkThreshold gained a Threshold record
   (7 -> 4 params) with the parameter-list finding cleared and its remaining complexity debt noted.
 - Full battery: clean check build EXIT 0; WORKSPACE_EDIT_TEST.md untouched.
+
+## Session record — 2026-10-26 (TUI keypress refresh regression fixed)
+- Reported symptom (v0.2.0): Up/Down keys made System Resources graphs jump and the Memory
+  Leak Analysis "Observed ... min:" value inflate abnormally fast.
+- Root cause: every key press calls wakeRenderer() -> shutdownLock.notifyAll(), and the main
+  loop waited a fixed refreshMillis after each cycle; an early wake jumped straight to the top
+  of the loop and ran a FULL collection cycle (system + process + JVM + heap samples) plus a
+  render. Each keypress thus sampled early, appended an extra graph history sample (render()
+  also appended internally) and inflated the leak "Observed min" span (calculated observation
+  window in minutes, built by MemoryTrendAnalyzer.buildExplanations — not a user threshold).
+- Fix: collection is now gated by the elapsed refresh interval (CollectionGate, injectable
+  clock). Early wake-ups only re-render the last collected snapshot; they never collect or
+  append history. History is recorded exactly once per completed collection cycle
+  (renderer.updateHistory moved post-collection; render()'s internal recordHistory removed,
+  making render purely observational). runLoop extracted from start() (package-private, gate
+  injectable) and no longer depends on start() for running/refreshMillis init. Dead field
+  latestAnalysis removed (overlays now use the same post-collection analysis value).
+- Regression tests: TuiCollectionGateTest (8 unit tests, injected fake clock) and
+  TuiRunLoopTest (3 loop tests with fake collectors/session/renderer and a controllable gate
+  clock): 2 keyboard bursts produce 0 extra collections (fails under v0.2.0 behavior —
+  verified by a temporary canary reverting the gate), collection resumes exactly after the
+  interval elapses, and quit stops the loop. Battery: clean check build EXIT 0, 183 tests/
+  0 failures; WORKSPACE_EDIT_TEST.md untouched. Manual interactive verification still required.

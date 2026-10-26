@@ -485,8 +485,6 @@ public class TuiRenderer {
                 ? usedRamBytes / (double) totalBytes * MonitoringConstants.PERCENT_SCALE
                 : 0.0; // magic-exempt: intrinsic zero/one arithmetic operand
 
-        recordHistory(cpuOptional, totalBytes, freeBytes, jvm);
-
         double heapPercent = jvm.heapMax() > 0 // magic-exempt: sanity guard against unknown/negative values
                 ? (double) jvm.heapUsed() / jvm.heapMax() * MonitoringConstants.PERCENT_SCALE
                 : 0.0; // magic-exempt: intrinsic zero/one arithmetic operand
