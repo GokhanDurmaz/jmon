@@ -5,24 +5,57 @@
 <!--
   Targeted suppressions, each with a justification.
 
-  The SpringBootMetricsClient / SpringBootActuatorIntegrationTest files
-  are part of the protected staged Actuator-integration snapshot that is
-  still awaiting an explicit user decision to commit. To keep both Git
-  layers intact while the decision is pending, pre-existing findings in
-  those files are suppressed by file+line instead of being refactored.
-  Remove these suppressions once the staged integration is committed and
-  the findings can be fixed in place.
+  Historical note: the suppressions for the staged Actuator-integration
+  snapshot (io.jmon.spring.SpringBootMetricsClient:167 EmptyCatchBlock and
+  io.jmon.spring.SpringBootActuatorIntegrationTest:3 UnusedImports) were
+  removed after the layered-architecture migration: the affected files
+  moved to io.jmon.infrastructure / io.jmon.presentation and both
+  findings were fixed in place (the empty catch now carries an
+  explanatory comment; the unused imports were deleted).
 -->
 <suppressions>
-    <!-- Intentional per-metric failure isolation: a single failed future
-         join must not abort the whole metric snapshot. The catch is empty
-         because ignored metrics are simply dropped. -->
-    <suppress checks="EmptyCatchBlock"
-            files="src/main/java/io/jmon/spring/SpringBootMetricsClient\.java"
-            lines="167"/>
 
-    <!-- Unused import documented for removal with the staged snapshot. -->
-    <suppress checks="UnusedImports"
-            files="src/test/java/io/jmon/spring/SpringBootActuatorIntegrationTest\.java"
-            lines="3"/>
+    <!-- CLI output policy: io.jmon.app.Main is the composition root and
+         command-line interface. Its help/version/error printing is the
+         product's stdout surface (not logging), so System.out use there
+         is sanctioned by design. Everywhere else System.out/err and
+         printStackTrace are prohibited in favor of the tinylog facade. -->
+    <suppress checks="RegexpSinglelineJava"
+            files="src[\\/]main[\\/]java[\\/]io[\\/]jmon[\\/]app[\\/]Main\.java"/>
+
+    <!-- Magic numbers are assertion expectations in tests; the policy allows
+         literal expected values there when their meaning is clear. -->
+    <suppress checks="MagicNumber"
+            files="[\\/]src[\\/]test[\\/]"/>
+
+    <!-- Test-tier policy: review rules (Javadoc, file length) apply to
+         production sources; tests are skipped for these review-only rules
+         while production still fails the build. -->
+    <suppress checks="MissingJavadocMethod"
+            files="[\\/]src[\\/]test[\\/]"/>
+    <suppress checks="MissingJavadocType"
+            files="[\\/]src[\\/]test[\\/]"/>
+    <suppress checks="FileLength"
+            files="[\\/]src[\\/]test[\\/]"/>
+    <!-- App-standins TestApp is a deliberate CLI fixture: its stdout
+         banner must exist as end-user output; logging would hide it. -->
+    <suppress checks="RegexpSinglelineJava"
+            files="src[\\/]test[\\/]java[\\/]io[\\/]jmon[\\/]app[\\/]TestApp\.java"/>
+
+    <!-- JUnit rule constants and test-method display names use descriptive
+         snake_case in tests (readability); production naming stays strict. -->
+    <suppress checks="MethodName"
+            files="[\\/]src[\\/]test[\\/]"/>
+    <suppress checks="ConstantName"
+            files="[\\/]src[\\/]test[\\/]"/>
+
+    <!-- Pre-existing oversized files flagged at the 400-line warning tier.
+         Splitting them is P1 hot-path remediation (JcmdDeepDiagnostics,
+         MemoryTrendAnalyzer, Tui, TuiRenderer); the hard 600-line failing
+         tier is kept for everything else, so newly oversized files still
+         fail the build. TODO(#backlog): split each file by cohesive
+         responsibilities in a dedicated refactoring change. -->
+    <suppress checks="FileLength"
+            files="src[\\/]main[\\/]java[\\/](?:io[\\/]jmon[\\/]infrastructure[\\/]diagnostics[\\/]JcmdDeepDiagnostics|io[\\/]jmon[\\/]domain[\\/]memory[\\/]MemoryTrendAnalyzer|io[\\/]jmon[\\/]presentation[\\/]tui[\\/]Tui|io[\\/]jmon[\\/]presentation[\\/]tui[\\/]view[\\/]TuiRenderer)\.java"/>
+
 </suppressions>
