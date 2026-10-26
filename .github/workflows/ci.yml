@@ -44,7 +44,8 @@ jobs:
           tail -n 200 /tmp/build.log >> "$GITHUB_STEP_SUMMARY"
           echo "```" >> "$GITHUB_STEP_SUMMARY"
           mkdir -p qa
-          tail -n 400 /tmp/build.log > qa/last-verification.log
+          tail -n 200 /tmp/build.log > qa/last-verification.log
+          { echo "===== checkstyleMain.xml"; cat build/reports/checkstyle/main.xml; echo "===== checkstyleTest.xml"; cat build/reports/checkstyle/test.xml; } >> qa/last-verification.log
       - name: Commit diagnostic log (temporary)
         if: failure()
         run: |
