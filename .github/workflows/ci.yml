@@ -8,7 +8,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   verify:
@@ -43,6 +43,16 @@ jobs:
           echo "```text" >> "$GITHUB_STEP_SUMMARY"
           tail -n 200 /tmp/build.log >> "$GITHUB_STEP_SUMMARY"
           echo "```" >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p qa
+          tail -n 400 /tmp/build.log > qa/last-verification.log
+      - name: Commit diagnostic log (temporary)
+        if: failure()
+        run: |
+          git config user.name "ci-diagnostics"
+          git config user.email "ci@invalid"
+          git add qa/last-verification.log
+          git commit -m "ci: verification log for run ${{ github.run_id }}"
+          git push origin HEAD:main
 
       - name: Upload test reports on failure
         if: failure()
