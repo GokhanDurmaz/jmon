@@ -1,18 +1,40 @@
 package io.jmon.app;
 
-import io.jmon.core.MemoryTrendAnalyzer;
-import io.jmon.core.MonitorConfiguration;
-import io.jmon.core.HealthEvaluator;
-import io.jmon.core.SystemTimeSource;
-import io.jmon.tui.Tui;
-import io.jmon.tui.TuiRenderer;
-import io.jmon.spring.SpringBootMetricsClient;
-import io.jmon.system.*;
-
 import java.nio.file.Path;
 import java.time.Duration;
 
+import io.jmon.application.MonitorConfiguration;
+import io.jmon.application.port.out.SpringBootMetricsClient;
+import io.jmon.domain.health.HealthEvaluator;
+import io.jmon.domain.memory.MemoryTrendAnalyzer;
+import io.jmon.domain.memory.SystemTimeSource;
+import io.jmon.infrastructure.actuator.HttpSpringBootMetricsClient;
+import io.jmon.infrastructure.diagnostics.JcmdClassHistogramCollector;
+import io.jmon.infrastructure.diagnostics.JcmdDeepDiagnostics;
+import io.jmon.infrastructure.jvm.AttachJvmConnectionSource;
+import io.jmon.infrastructure.system.OshiTargetProcessCollector;
+import io.jmon.infrastructure.system.RealSystemMetricsCollector;
+import io.jmon.presentation.tui.Tui;
+import io.jmon.presentation.tui.view.TuiRenderer;
+
+/** Main . */
 public class Main {
+
+    /** Exit code signalling invalid CLI usage (non-zero, non-doc). */
+    private static final int USAGE_ERROR_EXIT_CODE = 2;
+
+    /** Smallest accepted leak-observation window in minutes. */
+    private static final int MIN_LEAK_WINDOW_MINUTES = 1;
+
+    /** Largest accepted leak-observation window (one day, minutes). */
+    private static final int MAX_LEAK_WINDOW_MINUTES = 1440;
+
+    /** Historic samples a leak evaluation must cover before verdicts. */
+    private static final int LEAK_MIN_HISTORY_SAMPLES = 6;
+
+    /** Corroboration samples required per history window by the analyzer. */
+    private static final int LEAK_MIN_CORROBORATION_SAMPLES = 4;
+/** CLI entry point orchestrating the monitoring session. */
 
     public static void main(String[] args) {
         String version = System.getProperty("jmon.version", "development");
@@ -31,9 +53,9 @@ public class Main {
 
         Integer pid = parsePid(args);
 
-        if (pid == null || pid <= 0) {
+        if (pid == null || pid <= 0) { // magic-exempt: zero-mode comparison (e.g. pointer position)
             printUsage();
-            System.exit(2);
+            System.exit(USAGE_ERROR_EXIT_CODE);
             return;
         }
 
@@ -43,25 +65,26 @@ public class Main {
 
         SpringBootMetricsClient springBootClient =
                 config.getSpringBootEndpoint().isPresent()
-                        ? new SpringBootMetricsClient(config)
+                        ? new HttpSpringBootMetricsClient(config)
                         : null;
 
         Tui tui = new Tui(
                 config,
                 pid,
                 new RealSystemMetricsCollector(),
-                new TargetProcessCollector(),
-                new ClassHistogramCollector(),
+                new AttachJvmConnectionSource(),
+                new OshiTargetProcessCollector(),
+                new JcmdClassHistogramCollector(),
                 new MemoryTrendAnalyzer(
                         SystemTimeSource.systemDefault(),
                         config.getLeakObservationWindow(),
-                        6,
-                        4
+                        LEAK_MIN_HISTORY_SAMPLES,
+                        LEAK_MIN_CORROBORATION_SAMPLES
                 ),
                 new HealthEvaluator(),
                 new TuiRenderer(),
                 springBootClient,
-                new DeepDiagnostics(config.getDiagnosticsDir())
+                new JcmdDeepDiagnostics(config.getDiagnosticsDir())
         );
         tui.start();
     }
@@ -69,38 +92,38 @@ public class Main {
     static MonitorConfiguration.Builder configureSpringBoot(
             MonitorConfiguration.Builder builder, String[] args) {
 
-        for (int i = 0; i < args.length; i++) {
+        for (int i = 0; i < args.length; i++) { // magic-exempt: ordinary loop start index
             String arg = args[i];
 
             if (arg.startsWith("--spring-endpoint=")) {
                 builder.springBootEndpoint(
                         arg.substring("--spring-endpoint=".length()));
             } else if ("--spring-endpoint".equals(arg)
-                    && i + 1 < args.length) {
+                    && i + 1 < args.length) { // magic-exempt: next-occurrence index arithmetic
                 builder.springBootEndpoint(args[++i]);
             } else if (arg.startsWith("--spring-user=")) {
                 builder.springBootUsername(
                         arg.substring("--spring-user=".length()));
             } else if ("--spring-user".equals(arg)
-                    && i + 1 < args.length) {
+                    && i + 1 < args.length) { // magic-exempt: next-occurrence index arithmetic
                 builder.springBootUsername(args[++i]);
             } else if (arg.startsWith("--spring-password=")) {
                 builder.springBootPassword(
                         arg.substring("--spring-password=".length()));
             } else if ("--spring-password".equals(arg)
-                    && i + 1 < args.length) {
+                    && i + 1 < args.length) { // magic-exempt: next-occurrence index arithmetic
                 builder.springBootPassword(args[++i]);
             } else if (arg.startsWith("--leak-window-minutes=")) {
                 builder.leakObservationWindow(parseWindowMinutes(
                         arg.substring("--leak-window-minutes=".length())));
             } else if ("--leak-window-minutes".equals(arg)
-                    && i + 1 < args.length) {
+                    && i + 1 < args.length) { // magic-exempt: next-occurrence index arithmetic
                 builder.leakObservationWindow(parseWindowMinutes(args[++i]));
             } else if (arg.startsWith("--diagnostics-dir=")) {
                 builder.diagnosticsDir(Path.of(
                         arg.substring("--diagnostics-dir=".length())));
             } else if ("--diagnostics-dir".equals(arg)
-                    && i + 1 < args.length) {
+                    && i + 1 < args.length) { // magic-exempt: next-occurrence index arithmetic
                 builder.diagnosticsDir(Path.of(args[++i]));
             }
         }
@@ -111,7 +134,8 @@ public class Main {
     private static Duration parseWindowMinutes(String value) {
         try {
             long minutes = Long.parseLong(value);
-            if (minutes < 1 || minutes > 1440) {
+            if (minutes < MIN_LEAK_WINDOW_MINUTES
+                        || minutes > MAX_LEAK_WINDOW_MINUTES) {
                 throw new IllegalArgumentException(
                         "--leak-window-minutes must be between 1 and 1440,"
                                 + " got " + value);
@@ -120,7 +144,7 @@ public class Main {
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException(
                     "--leak-window-minutes expects a number of minutes,"
-                            + " got " + value);
+                            + " got " + value, e);
         }
     }
 
@@ -153,10 +177,10 @@ public class Main {
     }
 
     private static Integer parsePid(String[] args) {
-        for (int i = 0; i < args.length; i++) {
-            if ("--pid".equals(args[i]) && i + 1 < args.length) {
+        for (int i = 0; i < args.length; i++) { // magic-exempt: ordinary loop start index
+            if ("--pid".equals(args[i]) && i + 1 < args.length) { // magic-exempt: next-occurrence index arithmetic
                 try {
-                    return Integer.parseInt(args[i + 1]);
+                    return Integer.parseInt(args[i + 1]); // magic-exempt: next-occurrence index arithmetic
                 } catch (NumberFormatException e) {
                     return null;
                 }

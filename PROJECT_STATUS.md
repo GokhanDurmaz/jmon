@@ -41,3 +41,89 @@ TEST CONTENT
 - CLI: --leak-window-minutes (1..1440, default 10, validated with clear errors) and --diagnostics-dir via MonitorConfiguration builder; usage text updated.
 - Verification: full suite `./gradlew test --rerun-tasks` = 133 tests, 0 failures/errors/skipped (new: MemoryTrendAnalyzerTest 13, ClassGrowthTrackerTest 6, DeepDiagnosticsTest 9, renderer 5, keyboard 4, config 4, Main 5). Staged Actuator snapshot untouched; WORKSPACE_EDIT_TEST.md untouched.
 - Limitations: post-GC timestamps are drain-time approximations; histogram cadence fixed at 15 s; retention fixed at 1440 samples; per-object/retained analysis out of scope; deep diagnostics verified at unit level with mocked processes only (no live heap dump was generated against a real target in this session).
+
+## Session record — 2026-10-26 (layered architecture migration completed)
+- Migration continued from the partly-moved working tree and finished without destructive git operations. Final layout: `io.jmon.domain` (pure models/rules), `io.jmon.application` (use cases + ports: SystemMetricsCollector, ProcessCollector, TargetProcessCollector, ClassHistogramCollector, SpringBootMetricsClient, DiagnosticsService, JvmConnectionSource/JvmSession, plus existing JvmMetricsProvider/registry types and MonitorConfiguration), `io.jmon.infrastructure` (adapters: OshiTargetProcessCollector, RealSystemMetricsCollector/RealProcessCollector, JcmdClassHistogramCollector, JcmdDeepDiagnostics, HttpSpringBootMetricsClient, JmxGcMonitor + new AttachJvmConnectionSource/JmxJvmSession session encapsulation), `io.jmon.presentation` (Tui, TuiRenderer), `io.jmon.app` (composition root).
+- New application ports created from existing call sites; MonitorConfiguration stays in `io.jmon.application` (config value object wired through every collector port). New domain record `OperationCapability` (moved out of the old DeepDiagnostics nested type).
+- Dependency inversion completed: Tui no longer constructs JvmAttachService/JvmMetricsCollector/JmxGcMonitor — it receives a `JvmConnectionSource` and opens a `JvmSession` per run (session owns the JMX connector + GC monitor + JVM-metrics collector; connector is closed even when GC-pool discovery fails). JmxGcMonitor and JvmMetricsCollector are internal to the JmxJvmSession lifecycle. Tui/TuiRenderer now use domain ClassMemoryStat and domain OperationCapability; presentation imports only application/domain + JLine.
+- Composition root: `Main::main` wires RealSystemMetricsCollector, AttachJvmConnectionSource, OshiTargetProcessCollector, JcmdClassHistogramCollector, MemoryTrendAnalyzer, HealthEvaluator, TuiRenderer, optional HttpSpringBootMetricsClient and JcmdDeepDiagnostics.
+- module-info exports the five new packages (app/application/domain/infrastructure/presentation); old core/spring/system/tui exports removed.
+- Tests migrated via git mv (history preserved): domain (ProcessMetricsTest, SystemMetricsTest, ClassIdentityTest, ClassGrowthTrackerTest), application (MemoryTrendAnalyzerTest, MonitorConfigurationTest, SystemMetricsCollectorTest, SpringBootMetricsPollerTest), infrastructure (SpringBootMetricsClientTest, SpringBootActuatorIntegrationTest, RealSystemMetricsCollectorTest, JcmdDeepDiagnosticsTest — renamed class to match), presentation (TuiKeyboardTest, TuiRendererTest). Constructor calls/mocks updated (Tui now takes 11 deps incl. JvmConnectionSource; JcmdDeepDiagnostics replaces DeepDiagnostics; HttpSpringBootMetricsClient implements the SpringBootMetricsClient port).
+- ArchUnit enforcement added (archunit-junit5 1.3.0): domain has no deps on other layers or OSHI/JLine/Jackson/JMX/attach/JNA; application no deps on infrastructure/presentation; presentation no deps on infrastructure or monitoring frameworks; infrastructure no deps on presentation/app (src/test/java/io/jmon/app/ArchitectureTest.java).
+- Static analysis: stale Checkstyle suppressions for the previously staged Actuator snapshot removed (files moved; both findings fixed in place — the empty catch in HttpSpringBootMetricsClient now carries an explanatory comment, unused imports deleted).
+- Verification: `./gradlew test --rerun-tasks` = 148 tests, 0 failures/errors/skipped (incl. 5 ArchUnit rules); `./gradlew checkstyleMain checkstyleTest pmdMain pmdTest` clean; `./gradlew build` successful.
+- Limitations / follow-ups: heap-dump/JFR deep diagnostics still verified mock-level only; `TestApp` and SpringBootActuatorIntegrationTest exercises remain in app/infrastructure test packages intentionally; README architecture section updated, hook scripts/install docs need no change; WORKSPACE_EDIT_TEST.md untouched. Not yet committed (user decision).
+
+## Session record — 2026-10-26 (subpackage cohesion refactoring)
+- Continued from the flat 4-layer layout and regrouped every package by responsibility, preserving all behavior and the Clean-Architecture directions. Final layout: `io.jmon.domain.{memory,metrics,health,diagnostics}`, `io.jmon.application` (root: MonitorConfiguration) + `.monitoring` (SpringBootMetricsPoller + legacy aggregation APIs) + `.port.out` (8 outbound ports), `io.jmon.infrastructure.{system,jvm,diagnostics,actuator}`, `io.jmon.presentation.tui` (Tui) + `.tui.view` (TuiRenderer), `io.jmon.app` (Main/TestApp/ArchitectureTest untouched).
+- Notable classification decisions: MemoryTrendAnalyzer moved from application into the domain (`domain.memory`) as an IO-free clock-injected policy engine; input handling NOT extracted from `presentation.tui` because `Tui.handleKey` mutates ~10 pieces of loop/view state (documented compromise); no `port.in` package (no inbound ports exist).
+- Production and test sources both regrouped (git mv where files were tracked; the port interfaces and two infrastructure classes are untracked by history and exist only at their new locations). All package declarations, imports, and module-info rewritten — module-info now exports 14 packages.
+- ArchUnit rules updated to subpackage awareness (`..` package patterns) and strengthened: domain independence from all layers + OSHI/JLine/Jackson/JMX/Attach/JNA/SLF4J; application independence from infrastructure/presentation; presentation independence from infrastructure; infrastructure may not depend on presentation/app/`application.monitoring..`; only `io.jmon.app..` and `io.jmon.infrastructure..` may depend on `io.jmon.infrastructure..` (composition-root wiring).
+- Checkstyle: fixed 3 post-move violations (redundant same-package import in SystemMetricsCollectorTest, unused wildcard remnant + duplicated `domain.memory.*` import in SpringBootMetricsClientTest/TuiRendererTest).
+- Verification (all run, all green): `./gradlew classes`; `./gradlew test --rerun-tasks` = 148 tests, 0 failures/errors (incl. 5 ArchUnit rules + MemoryTrendAnalyzerTest 17 + TuiKeyboardTest 19); `./gradlew checkstyleMain checkstyleTest pmdMain pmdTest` clean; `./gradlew build --rerun-tasks` successful (exit 0); `git diff --check` clean; no remaining flat-package references (`io.jmon.presentation.X` / `io.jmon.infrastructure.X` / `io.jmon.application.X` / `io.jmon.domain.X` direct class refs) anywhere in src.
+- README "Project Structure" table rewritten for the subpackage layout (old 5-row flat table replaced; boundary-enforcement paragraph updated with the two new rules).
+- Limitations / follow-ups: deeper diagnostics still verified mock-level only; stale index state shows a few RD entries (git rename from the previous session's staging not refreshed) — informational only, no commit performed; input extraction from Tui deliberately deferred; Windows support untouched.
+
+## Session record — 2026-10-26 (strict magic-number policy + shared constant consolidation)
+- Checkstyle MagicNumber no longer globally exempts -1/0/1 (`ignoreNumbers=""`); per-line
+  documented exceptions go through `SuppressWithNearbyCommentFilter` (`// magic-exempt: <reason>`).
+- Sentinel/config-like literals replaced by named constants (UNKNOWN_ARTIFACT_BYTES, NO_PID,
+  NO_SAMPLE_ID, MIN_BASELINE_HEAP_BYTES, NO_KEY, FIRST_MEASUREMENT, HISTOGRAM_INSTANCES_GROUP,
+  MIN_POLL_SLEEP_MILLIS, ...). Negative canary verified: an unexplained operational literal
+  (`512345L`) fails `checkstyleMain` with a MagicNumber ERROR (BUILD FAILED); reverted after test.
+- New shared constants: `io.jmon.common.constants` (TimeConstants, DataSizeConstants,
+  MonitoringConstants) consolidating PERCENT_SCALE, KIB/MIB_BYTES, NANOS_PER_MILLIS,
+  MILLIS_PER_MINUTE, NANOS_PER_MINUTE, HISTOGRAM_TIMEOUT_SECONDS; consumers updated
+  (MemoryTrendAnalyzer, ClassGrowthTracker, TuiRenderer, JcmdDeepDiagnostics, HealthEvaluator,
+  JvmMonitoringService, JcmdClassHistogramCollector). Intentionally separate: DRAIN_JOIN_MILLIS
+  vs MILLIS_PER_SECOND vs REFRESH_INTERVAL_STEP_MILLIS (equal values, different semantics).
+- ArchUnit updated: canonical-package allowlist now includes `io.jmon.common..`; new rule
+  `common_must_be_a_leaf_package` (common depends on no internal layer).
+- Verification (all exit code 0): clean + checkstyleMain + checkstyleTest + pmdMain + pmdTest +
+  test + check + build; 152/152 tests green (151 existing + 1 new ArchUnit rule); review
+  profiles unchanged (reviewMain 81, reviewTest 8 report-only findings).
+- Next: trim remaining magic-exempt justifications where better named constants could exist;
+  enlarge ImageSize/ChangeSize suppressions still pending baseline discussion.
+
+## Session record — 2026-10-26 (QA audit and enforcement strengthening)
+- Gate effectiveness verified by controlled canaries (all reverted): a presentation→infra
+  dependency and a common→domain dependency each fail the matching ArchUnit rules; a PMD canary
+  fires UnusedPrivateField/UnusedLocalVariable/CloseResource/PreserveStackTrace; a Checkstyle
+  canary fails. Canaries confirmed real gates, not placeholders.
+- Policy gap closed: previously a magic literal in ANY field initialization passed untouched.
+  Now `ignoreFieldDeclaration=false` with an xpath suppression that exempts only FINAL field
+  declarations; mutable (incl. static) field literals fail — MonitorConfiguration defaults,
+  Tui and TuiRenderer sentinels converted to named constants as a result.
+- Real defect fixed: HealthEvaluator used String.format without Locale.ROOT — locale-dependent
+  decimal separators (BREAKS alerts on tr/de/etc. locales). Caught by the new HealthEvaluatorTest
+  (boundary values exactly at 80/90/95 thresholds, escalation, absent-metric branches). Formatter
+  audited: TuiRenderer already used Locale.ROOT everywhere.
+- New tests: HealthEvaluatorTest (10), JvmMonitoringServiceTest (5: success composition,
+  provider-failure mapping, independent failure isolation, shutdown idempotence; after-shutdown
+  collect is rejected). 167 total, 0 failures.
+- CI: added .github/workflows/ci.yml running `clean check build` on push/PR (check = test +
+  Checkstyle + strict PMD + ArchUnit + informational review PMD); release build upgraded from
+  `clean test installDist` to `clean check build installDist`.
+- Verified battery: clean checkstyleMain checkstyleTest pmdMain pmdTest test check build
+  (EXIT 0); review tier unchanged (81 + 8 informational).
+- Remaining debt: hardcoded 10 s/20 s timeouts in JvmMonitoringService not runtime-injectable
+  (timeout path not unit-testable); FileLength suppressions for 4 oversized files still
+  TODO(#backlog); review finds 81 report-only items pending triage.
+
+## Session record — 2026-10-26 (timeout seams deterministically tested, CI validated, review triage)
+- JvmMonitoringService now accepts injected collection timeouts (2-arg constructor keeps the
+  10 s / ProductionConstants defaults; 4-arg Duration constructor for tests/config); collects
+  cancel hung tasks via Future.cancel(true) on timeout; constructor validates providers/timeouts.
+- New tests genuinely exercise: snapshot & histogram timeout paths (latched providers, 50 ms
+  timeouts, deterministic over 3 reruns), timeout->cancellation evidence (underlying task thread
+  observes its interrupted flag), caller interruption->ERROR "Interrupted" with preserved
+  interrupt flag, constructor validation, post-shutdown rejection. 10 tests in this class.
+- CI: exact workflow command `./gradlew clean check build` run locally, green (172 tests/
+  0 failures, EXIT 0). The ci.yml is still untracked so a GitHub Actions run could not be
+  observed remotely (gh only lists the existing Release JMon workflow).
+- Review-tier PMD triage: CyclomaticComplexity 27-28, NcssCount 17-24, CognitiveComplexity 22,
+  ExcessiveParameterList 13-15, TooManyFields 1 (all priority 3). Prioritized: MemoryTrendAnalyzer
+  > Tui/TuiRenderer > JcmdDeepDiagnostics (cohesive-splits, backlogged), then record-based
+  constructor cleanups. Fixed now: HealthEvaluator.checkThreshold gained a Threshold record
+  (7 -> 4 params) with the parameter-list finding cleared and its remaining complexity debt noted.
+- Full battery: clean check build EXIT 0; WORKSPACE_EDIT_TEST.md untouched.

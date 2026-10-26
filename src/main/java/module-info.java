@@ -1,3 +1,13 @@
+/* JMon layered module:
+ * - io.jmon.domain.{memory,metrics,health,diagnostics} : pure domain models and rules
+ * - io.jmon.application + monitoring / port.out        : use-case services and ports
+ * - io.jmon.infrastructure.{jvm,system,diagnostics,actuator} : adapters
+ *   (OSHI, Attach/JMX, jcmd, Actuator HTTP)
+ * - io.jmon.presentation.tui(+view)                    : terminal UI
+ * - io.jmon.app                                        : composition root
+ * Dependency direction: presentation/application -> domain; infrastructure
+ * implements application ports; io.jmon.app wires concrete implementations.
+ */
 module jmon {
     requires java.desktop;
     requires java.net.http;
@@ -16,8 +26,17 @@ module jmon {
     requires org.jline;
 
     exports io.jmon.app;
-    exports io.jmon.core;
-    exports io.jmon.system;
-    exports io.jmon.spring;
-    exports io.jmon.tui;
+    exports io.jmon.application;
+    exports io.jmon.application.monitoring;
+    exports io.jmon.application.port.out;
+    exports io.jmon.domain.diagnostics;
+    exports io.jmon.domain.health;
+    exports io.jmon.domain.memory;
+    exports io.jmon.domain.metrics;
+    exports io.jmon.infrastructure.actuator;
+    exports io.jmon.infrastructure.diagnostics;
+    exports io.jmon.infrastructure.jvm;
+    exports io.jmon.infrastructure.system;
+    exports io.jmon.presentation.tui;
+    exports io.jmon.presentation.tui.view;
 }

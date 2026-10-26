@@ -18,6 +18,33 @@ pmd {
     consoleOutput = true
 }
 
+// Review-tier PMD: size/complexity thresholds reported for every `check`
+// without failing the build (see config/pmd/pmd-review.xml header).
+def reviewRuleSet = files('config/pmd/pmd-review.xml')
+tasks.register('pmdReviewMain', Pmd) {
+    group = 'verification'
+    description = 'Review-tier PMD for main sources (reports, does not fail).'
+    source = sourceSets.main.allJava
+    ruleSetFiles = reviewRuleSet
+    ruleSets = []
+    ignoreFailures = true
+}
+tasks.register('pmdReviewTest', Pmd) {
+    group = 'verification'
+    description = 'Review-tier PMD for test sources (reports, does not fail).'
+    source = sourceSets.test.allJava
+    ruleSetFiles = reviewRuleSet
+    ruleSets = []
+    ignoreFailures = true
+}
+check.dependsOn tasks.named('pmdReviewMain'), tasks.named('pmdReviewTest')
+
+// Test sources use the strict ruleset minus the two rules with documented
+// test-only false positives (see config/pmd/pmd-test-ruleset.xml).
+tasks.named('pmdTest') {
+    ruleSetFiles = files('config/pmd/pmd-test-ruleset.xml')
+}
+
 // Checkstyle's ANTLR grammar cannot process JPMS module declarations;
 // module-info.java is excluded from style analysis (documented policy).
 tasks.withType(Checkstyle).configureEach {
@@ -48,6 +75,7 @@ dependencies {
 
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
     testImplementation 'org.mockito:mockito-core:5.11.0'
+    testImplementation 'com.tngtech.archunit:archunit-junit5:1.3.0'
 
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }

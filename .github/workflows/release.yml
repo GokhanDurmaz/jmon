@@ -32,7 +32,8 @@ jobs:
       - name: Test and build distribution
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          ./gradlew -PreleaseVersion="$VERSION" clean test installDist
+          # check = test + Checkstyle + strict PMD + ArchUnit + review PMD
+          ./gradlew -PreleaseVersion="$VERSION" clean check build installDist
 
       - name: Verify Windows launcher
         run: |

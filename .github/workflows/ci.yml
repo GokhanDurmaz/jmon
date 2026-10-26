@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Test, style checks and build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+
+      # check = test + Checkstyle (main/test) + strict PMD (main/test) +
+      # ArchUnit architecture rules + review-tier PMD (informational).
+      - name: Run full verification
+        run: ./gradlew clean check build
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-and-quality-reports
+          path: |
+            build/reports/tests
+            build/reports/checkstyle
+            build/reports/pmd
+          if-no-files-found: ignore

@@ -346,12 +346,28 @@ build\install\jmon\bin\jmon.bat --pid 12345
 
 ## Project Structure
 
-| Package | Responsibility |
-|---|---|
-| `io.jmon.app` | Application entry point, CLI arguments, and configuration |
-| `io.jmon.core` | Domain models, metric snapshots, and health evaluation |
-| `io.jmon.system` | System, process, and JVM metric collection |
-| `io.jmon.tui` | Terminal UI, input handling, and view models |
+JMon is organized as a layered architecture with an explicit dependency
+direction: `presentation -> application -> domain`, with
+`infrastructure` implementing application-owned ports behind
+domain/framework boundaries and `app` acting as the composition root
+that wires concrete implementations into the ports.
+
+| Package | Layer | Responsibility |
+|---|---|---|
+| `io.jmon.domain.{memory,metrics,health,diagnostics}` | Domain | Pure monitoring concepts, value objects, and domain rules: memory-leak analysis (`MemoryTrendAnalyzer`, `ClassGrowthTracker`, `ClassIdentity`), metric snapshots (`SystemMetrics`, `ProcessMetrics`, `JvmMetrics`, Spring Boot snapshots), health evaluation (`HealthEvaluator`), and deep-diagnostics outcomes (`DiagnosticOutcome`, `OperationCapability`). No OSHI/JMX/HTTP/JLine dependencies. |
+| `io.jmon.application` (+ `.monitoring`, `.port.out`) | Business/Application | Use cases (`SpringBootMetricsPoller`, legacy `JvmMonitoringService` aggregation APIs under `.monitoring`; `MemoryTrendAnalyzer` lives in the domain) and outbound ports under `.port.out` (`SystemMetricsCollector`, `ProcessCollector`, `TargetProcessCollector`, `ClassHistogramCollector`, `JvmConnectionSource`/`JvmSession`, `SpringBootMetricsClient`, `DiagnosticsService`). `MonitorConfiguration` (user config) stays at the `io.jmon.application` root. |
+| `io.jmon.infrastructure.{system,jvm,diagnostics,actuator}` | Data/Infrastructure | Adapters implementing the application ports, grouped by capability: OSHI system/process collectors (`.system`), JVM Attach/JMX session and metrics (`.jvm`: `JvmAttachService`, `AttachJvmConnectionSource`, `JmxJvmSession`, `JvmMetricsCollector`, `JmxGcMonitor`), `jcmd` class histograms and deep diagnostics (`.diagnostics`), and the HTTP Actuator client (`.actuator`). |
+| `io.jmon.presentation.tui` (+ `.view`) | Presentation | Terminal UI and keyboard handling (`Tui`) with rendering isolated in `presentation.tui.view` (`TuiRenderer`). Uses only application ports and domain models — never concrete infrastructure services. |
+| `io.jmon.app` | Composition root | CLI argument parsing and wiring concrete infrastructure into application ports (`Main`, `TestApp`). |
+
+The boundaries are enforced by ArchUnit tests in
+`src/test/java/io/jmon/app/ArchitectureTest.java`, which fail the build
+if the domain depends on frameworks or other layers, if the application
+depends on infrastructure or the presentation, if the presentation
+depends on infrastructure (OSHI/JMX/HTTP), if infrastructure reaches
+into use-case services, the UI, or the composition root, or if anything
+but `io.jmon.app` (and infrastructure internally) references concrete
+adapters.
 
 ## Roadmap and Limitations
 

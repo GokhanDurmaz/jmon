@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  JMon PMD review ruleset (PMD 7.9.0).
+
+  Size/complexity REVIEW tier. Runs via the custom `pmdReview` Gradle tasks
+  with ignoreFailures = true: findings are reported (build/reports/pmd/)
+  for every `check` without failing the build, because the current baseline
+  still exceeds these thresholds in the TUI/CLI hot paths (documented as
+  an existing-violations backlog in PROJECT_STATUS.md).
+
+  Enabled review thresholds (failure thresholds per standards document):
+    - method NCSS                     review 30 / FAIL 50
+    - class NCSS                      review 250 / FAIL 400
+    - method cyclomatic complexity    review 8 / FAIL 12
+    - class cyclomatic complexity     review 80 / FAIL 80
+    - method cognitive complexity     review 10 / FAIL 15
+    - method parameters               review 4 / FAIL 6
+    - public methods per class        review 15 / FAIL 20
+    - fields per class                review 10 / FAIL 15
+  When the backlog is remediated, these rules move verbatim into the
+  enforced ruleset (config/pmd/pmd-ruleset.xml) and pmdReview is retired.
+-->
+<ruleset name="jmon-review"
+        xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0
+                    http://pmd.sourceforge.net/ruleset_2_0_0.xsd">
+    <description>JMon review-tier size/complexity ruleset</description>
+
+    <rule ref="category/java/design.xml/NcssCount">
+        <properties>
+            <property name="methodReportLevel" value="30"/>
+            <property name="classReportLevel" value="250"/>
+            <property name="ncssOptions" value="countImports"/>
+        </properties>
+    </rule>
+    <rule ref="category/java/design.xml/CyclomaticComplexity">
+        <properties>
+            <property name="methodReportLevel" value="8"/>
+            <property name="classReportLevel" value="80"/>
+        </properties>
+    </rule>
+    <rule ref="category/java/design.xml/CognitiveComplexity">
+        <properties>
+            <property name="reportLevel" value="10"/>
+        </properties>
+    </rule>
+    <rule ref="category/java/design.xml/ExcessiveParameterList">
+        <properties>
+            <property name="minimum" value="4"/>
+        </properties>
+    </rule>
+    <rule ref="category/java/design.xml/ExcessivePublicCount">
+        <properties>
+            <property name="minimum" value="15"/>
+        </properties>
+    </rule>
+    <rule ref="category/java/design.xml/TooManyFields">
+        <properties>
+            <property name="maxfields" value="10"/>
+        </properties>
+    </rule>
+</ruleset>

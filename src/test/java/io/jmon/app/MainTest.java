@@ -1,12 +1,15 @@
 package io.jmon.app;
 
-import io.jmon.core.MonitorConfiguration;
-import org.junit.jupiter.api.Test;
-
 import java.lang.reflect.Method;
 import java.time.Duration;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+
+import io.jmon.application.MonitorConfiguration;
 
 class MainTest {
 
@@ -37,9 +40,9 @@ class MainTest {
                 Main.configureSpringBoot(
                         MonitorConfiguration.builder(),
                         new String[] {
-                                "--spring-endpoint", "http://localhost:8080",
-                                "--spring-user", "user",
-                                "--spring-password", "secret"
+                            "--spring-endpoint", "http://localhost:8080",
+                            "--spring-user", "user",
+                            "--spring-password", "secret"
                         }
                 ).build();
 
@@ -54,9 +57,9 @@ class MainTest {
                 Main.configureSpringBoot(
                         MonitorConfiguration.builder(),
                         new String[] {
-                                "--spring-endpoint=http://localhost:8080",
-                                "--spring-user=user",
-                                "--spring-password=secret"
+                            "--spring-endpoint=http://localhost:8080",
+                            "--spring-user=user",
+                            "--spring-password=secret"
                         }
                 ).build();
 
@@ -85,8 +88,8 @@ class MainTest {
                         MonitorConfiguration.builder()
                                 .refreshInterval(Duration.ofSeconds(7)),
                         new String[] {
-                                "--spring-endpoint", "http://localhost:8080",
-                                "--pid", "12345"
+                            "--spring-endpoint", "http://localhost:8080",
+                            "--pid", "12345"
                         }
                 ).build();
 
@@ -106,7 +109,7 @@ class MainTest {
                 Main.configureSpringBoot(
                         MonitorConfiguration.builder(),
                         new String[] {
-                                "--leak-window-minutes", "45"
+                            "--leak-window-minutes", "45"
                         }
                 ).build();
 

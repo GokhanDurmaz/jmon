@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  JMon PMD test-sources ruleset (PMD 7.9.0): strict ruleset minus two rules
+  whose false-positive rate on tests is documented:
+    - AvoidDuplicateLiterals: literal expected values in assertions are the
+      policy-sanctioned form for tests (shared-constants policy targets
+      production code only).
+    - CloseResource: most flagged "resources" here are Mockito mocks of
+      Closeable types (mock(Terminal.class)) or sockets that are closed
+      immediately for port selection; keeping the rule on tests would
+      force suppressions at every mock while adding no real guarantee.
+  The production ruleset keeps both rules enforced.
+-->
+<ruleset name="jmon-standard-test"
+        xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0
+                    http://pmd.sourceforge.net/ruleset_2_0_0.xsd">
+    <description>JMon enforceable ruleset for test sources</description>
+    <rule ref="config/pmd/pmd-ruleset.xml">
+        <exclude name="AvoidDuplicateLiterals"/>
+        <exclude name="CloseResource"/>
+        <exclude name="OnlyOneReturn"/>
+    </rule>
+</ruleset>
