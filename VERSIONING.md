@@ -86,14 +86,13 @@ generated release notes.
 
 ## 3. Release History
 
-- `v0.2.0` - current published baseline during preparation of this policy
-  (Spring Boot Actuator monitoring, layered architecture, memory analysis,
-  diagnostics, QA gates).
-- `v0.2.1` - proposed next patch release for the verified TUI refresh
-  regression fix (keyboard wake-ups triggering unscheduled metrics
-  collection). Subject to qualification, validation, and successful
-  publication; this document records it as published in its post-release
-  revision.
+- `v0.2.0` - previous published release (Spring Boot Actuator monitoring,
+  layered architecture, memory analysis, diagnostics, QA gates).
+- `v0.2.1` - current published release
+  (https://github.com/GokhanDurmaz/jmon/releases/tag/v0.2.1): patch
+  regression fix for the TUI refresh schedule (keyboard wake-ups
+  triggering unscheduled metrics collection), verified by branch CI and
+  the tag-triggered release workflow.
 
 ## 4. Standard Release Workflow
 
