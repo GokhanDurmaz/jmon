@@ -106,6 +106,77 @@ class InstallerTest {
     }
 
     @Test
+    void acceptsTarContainingOnlyThePackageDirectory() throws IOException {
+        byte[] archive = TestArchives.tarGz(List.of(
+                TestArchives.dir("jmon", 0755),
+                TestArchives.file("jmon/bin/jmon", "launcher", 0755),
+                TestArchives.file("jmon/lib/app.jar", "jar bytes", 0644)
+        ));
+        Path archivePath = temp.resolve("jmon.tar.gz");
+        Files.write(archivePath, archive);
+        Path staged = installer.stageAndExtract(archivePath,
+                temp.resolve("work"), ArtifactSelector.PackageFormat.POSIX);
+        assertTrue(Files.isDirectory(staged));
+        assertTrue(Files.isRegularFile(staged.resolve("bin/jmon")));
+        assertTrue(Files.isExecutable(staged.resolve("bin/jmon")));
+        assertTrue(Files.isRegularFile(staged.resolve("lib/app.jar")));
+    }
+
+    @Test
+    void rejectsTarWithUnrelatedTopLevelFile() throws IOException {
+        byte[] archive = TestArchives.tarGz(List.of(
+                TestArchives.dir("jmon", 0755),
+                TestArchives.file("jmon/bin/jmon", "launcher", 0755),
+                TestArchives.file("loose-file.txt", "stray", 0644)
+        ));
+        Path archivePath = temp.resolve("jmon.tar.gz");
+        Files.write(archivePath, archive);
+        Files.createDirectories(temp.resolve("work"));
+        IOException e = assertThrows(IOException.class,
+                () -> installer.stageAndExtract(archivePath,
+                        temp.resolve("work"),
+                        ArtifactSelector.PackageFormat.POSIX));
+        assertTrue(e.getMessage()
+                .contains("outside the jmon package directory"));
+        assertFalse(extractHasAnyEntry(temp.resolve("work/extract")));
+    }
+
+    @Test
+    void rejectsTarWithUnrelatedTopLevelDirectory() throws IOException {
+        byte[] archive = TestArchives.tarGz(List.of(
+                TestArchives.dir("jmon", 0755),
+                TestArchives.dir("evil", 0755),
+                TestArchives.file("evil/payload.txt", "evil", 0644)
+        ));
+        Path archivePath = temp.resolve("jmon.tar.gz");
+        Files.write(archivePath, archive);
+        Files.createDirectories(temp.resolve("work"));
+        assertThrows(IOException.class, () -> installer.stageAndExtract(
+                archivePath, temp.resolve("work"),
+                ArtifactSelector.PackageFormat.POSIX));
+        assertFalse(treeContainsFileName(temp, "evil"));
+        assertFalse(extractHasAnyEntry(temp.resolve("work/extract")));
+    }
+
+    @Test
+    void rejectsTarWithPackageDirectoryLookalike() throws IOException {
+        byte[] archive = TestArchives.tarGz(List.of(
+                TestArchives.dir("jmon-evil", 0755),
+                TestArchives.file("jmon-evil/payload.txt", "evil", 0644)
+        ));
+        Path archivePath = temp.resolve("jmon.tar.gz");
+        Files.write(archivePath, archive);
+        Files.createDirectories(temp.resolve("work"));
+        IOException e = assertThrows(IOException.class,
+                () -> installer.stageAndExtract(archivePath,
+                        temp.resolve("work"),
+                        ArtifactSelector.PackageFormat.POSIX));
+        assertTrue(e.getMessage()
+                .contains("outside the jmon package directory"));
+        assertFalse(extractHasAnyEntry(temp.resolve("work/extract")));
+    }
+
+    @Test
     void rejectsDuplicateZipEntries() throws IOException {
         Path archivePath = temp.resolve("dup.zip");
         Files.write(archivePath, duplicateNameZip("jmon/bin/jmon.bat",
@@ -374,6 +445,18 @@ class InstallerTest {
         try (var stream = Files.walk(root)) {
             return stream.anyMatch(path -> path.getFileName()
                     .toString().equals(fileName));
+        }
+    }
+
+    /**
+     * True when the extraction directory holds any extracted entry;
+     * used to prove validation rejects the whole archive before the
+     * first write.
+     */
+    private static boolean extractHasAnyEntry(Path extractDir)
+            throws IOException {
+        try (var children = Files.list(extractDir)) {
+            return children.findAny().isPresent();
         }
     }
 

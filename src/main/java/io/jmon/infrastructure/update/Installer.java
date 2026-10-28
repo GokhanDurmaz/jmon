@@ -224,6 +224,14 @@ public class Installer {
 
     private void extractTarGz(Path archive, Path extractDir)
             throws IOException {
+        List<TarReader.Entry> entries;
+        try (InputStream raw = Files.newInputStream(archive);
+                GZIPInputStream gzip = new GZIPInputStream(raw)) {
+            entries = tarReader.read(gzip);
+        }
+        for (TarReader.Entry entry : entries) {
+            validateTarName(entry.name());
+        }
         try (InputStream raw = Files.newInputStream(archive);
                 GZIPInputStream gzip = new GZIPInputStream(raw)) {
             tarReader.forEach(gzip, (entry, payload) -> {
@@ -241,6 +249,16 @@ public class Installer {
                 }
             });
         }
+    }
+
+    private void validateTarName(String name) throws IOException {
+        String firstSegment = name.split("/")[FIRST_SEGMENT];
+        if (!TOP_LEVEL_DIRECTORY.equals(firstSegment)) {
+            throw new IOException("unexpected archive layout: '" + name
+                    + "' is outside the " + TOP_LEVEL_DIRECTORY
+                    + " package directory");
+        }
+        resolveInside(Path.of("tar-validation-root"), name);
     }
 
     private void extractZip(Path archive, Path extractDir)
