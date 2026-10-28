@@ -304,6 +304,16 @@ public class Installer {
     }
 
     private void validateZipName(String name) throws IOException {
+        // Zip entry names are validated as slash-separated paths, but on
+        // Windows java.nio.file re-interprets '\' as a separator after
+        // validation, which would let "jmon\..\x" escape containment.
+        // Backslash is therefore prohibited outright in zip entries;
+        // tar names (POSIX extraction only) may keep literal backslashes.
+        if (name.contains("\\")) {
+            throw new IOException("unsafe archive entry name: '" + name
+                    + "' (backslash components are not allowed in"
+                    + " zip package entries)");
+        }
         String firstSegment = name.split("/")[FIRST_SEGMENT];
         if (!TOP_LEVEL_DIRECTORY.equals(firstSegment)) {
             throw new IOException("unexpected archive layout: '" + name

@@ -130,6 +130,41 @@ class InstallerTest {
     }
 
     @Test
+    void rejectsZipEntriesWithBackslashTraversalNames() throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(out)) {
+            putEntry(zip, "jmon/bin/jmon.bat", "launcher");
+            putEntry(zip, "jmon/bin\\..\\..\\evil.bat", "evil");
+        }
+        Path archivePath = temp.resolve("evil-backslash.zip");
+        Files.write(archivePath, out.toByteArray());
+        Files.createDirectories(temp.resolve("work"));
+        IOException e = assertThrows(IOException.class,
+                () -> installer.stageAndExtract(archivePath,
+                        temp.resolve("work"),
+                        ArtifactSelector.PackageFormat.WINDOWS));
+        assertTrue(e.getMessage().contains("backslash"));
+        assertFalse(treeContainsFileName(temp, "evil.bat"));
+        assertFalse(treeContainsFileName(temp, "jmon.bat"));
+    }
+
+    @Test
+    void rejectsZipEntriesWithPlainBackslashComponents()
+            throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(out)) {
+            putEntry(zip, "jmon/bin\\evil-x.bat", "evil");
+        }
+        Path archivePath = temp.resolve("evil-backslash-x.zip");
+        Files.write(archivePath, out.toByteArray());
+        Files.createDirectories(temp.resolve("work"));
+        assertThrows(IOException.class, () -> installer.stageAndExtract(
+                archivePath, temp.resolve("evil-work"),
+                ArtifactSelector.PackageFormat.WINDOWS));
+        assertFalse(treeContainsFileName(temp, "evil-x.bat"));
+    }
+
+    @Test
     void swapsNewInstallationAsideAndExposesBackup() throws IOException {
         Path installRoot = temp.resolve("jmon");
         Files.createDirectories(installRoot.resolve("bin"));
@@ -327,6 +362,19 @@ class InstallerTest {
         zip.putNextEntry(new ZipEntry(name));
         zip.write(text.getBytes(StandardCharsets.UTF_8));
         zip.closeEntry();
+    }
+
+    /**
+     * True when any regular file or directory under {@code root} is
+     * named {@code fileName}, used to prove hostile entries never
+     * reached the filesystem anywhere in the test tree.
+     */
+    private static boolean treeContainsFileName(Path root,
+            String fileName) throws IOException {
+        try (var stream = Files.walk(root)) {
+            return stream.anyMatch(path -> path.getFileName()
+                    .toString().equals(fileName));
+        }
     }
 
     /**
