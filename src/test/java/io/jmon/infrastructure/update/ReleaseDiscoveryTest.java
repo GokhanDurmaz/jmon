@@ -16,10 +16,12 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 class ReleaseDiscoveryTest {
     private final HttpClient client = mock(HttpClient.class);
@@ -125,8 +127,73 @@ class ReleaseDiscoveryTest {
                 discovery.parseResponse("{\"name\": \"no tag\"}"));
     }
 
+    @Test
+    void sendsIdentifyingUserAgentAndAcceptOnApiRequest() throws Exception {
+        respond(200, "{\"tag_name\": \"v1.2.3\"}");
+        discovery.fetchLatestRelease();
+        ArgumentCaptor<HttpRequest> captor =
+                ArgumentCaptor.forClass(HttpRequest.class);
+        verify(client).send(captor.capture(),
+                any(HttpResponse.BodyHandler.class));
+        assertEquals("jmon-self-updater", captor.getValue().headers()
+                .firstValue("User-Agent").orElse(""));
+        assertEquals("application/vnd.github.v3+json", captor
+                .getValue().headers().firstValue("Accept").orElse(""));
+    }
+
+    @Test
+    void configuresNormalRedirectPolicyOnTheProductionClient() {
+        assertEquals(HttpClient.Redirect.NORMAL,
+                new ReleaseDiscovery().redirectPolicy());
+    }
+
+    @Test
+    void closesTheResponseBodyOnNotFound() throws Exception {
+        TrackingStream body = respondTracked(404, "{}".getBytes(
+                StandardCharsets.UTF_8));
+        assertEquals(
+                ReleaseDiscovery.DiscoveryOutcome.Status.NO_RELEASE,
+                discovery.fetchLatestRelease().status());
+        assertTrue(body.closed);
+    }
+
+    @Test
+    void closesTheResponseBodyOnServerError() throws Exception {
+        TrackingStream body = respondTracked(500, "{}".getBytes(
+                StandardCharsets.UTF_8));
+        assertEquals(
+                ReleaseDiscovery.DiscoveryOutcome.Status.ERROR,
+                discovery.fetchLatestRelease().status());
+        assertTrue(body.closed);
+    }
+
+    @Test
+    void closesTheResponseBodyWhenTheMetadataCapIsExceeded()
+            throws Exception {
+        TrackingStream body = respondTracked(200,
+                new byte[4 * 1024 * 1024 + 1]);
+        assertEquals(
+                ReleaseDiscovery.DiscoveryOutcome.Status.ERROR,
+                discovery.fetchLatestRelease().status());
+        assertTrue(body.closed);
+    }
+
     @SuppressWarnings("unchecked")
     private void respond(int status, String body) throws Exception {
+        stubSend(status, new ByteArrayInputStream(
+                body.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private TrackingStream respondTracked(int status, byte[] body)
+            throws Exception {
+        TrackingStream stream = new TrackingStream(body);
+        stubSend(status, stream);
+        return stream;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void stubSend(int status, java.io.InputStream body)
+            throws Exception {
         HttpHeaders headers =
                 HttpHeaders.of(Map.of(), (name, value) -> true);
         HttpResponse<java.io.InputStream> response =
@@ -134,10 +201,23 @@ class ReleaseDiscoveryTest {
                         HttpResponse.class);
         doReturn(status).when(response).statusCode();
         doReturn(headers).when(response).headers();
-        doReturn(new ByteArrayInputStream(
-                body.getBytes(StandardCharsets.UTF_8))).when(response)
-                .body();
+        doReturn(body).when(response).body();
         doReturn(response).when(client).send(any(HttpRequest.class),
                 any(HttpResponse.BodyHandler.class));
+    }
+
+    private static final class TrackingStream
+            extends ByteArrayInputStream {
+        private boolean closed;
+
+        TrackingStream(byte[] data) {
+            super(data);
+        }
+
+        @Override
+        public void close() throws IOException {
+            closed = true;
+            super.close();
+        }
     }
 }

@@ -37,6 +37,16 @@ public class DownloadManager {
     /** HTTP success status. */
     private static final int HTTP_OK = 200;
 
+    /**
+     * Identifying User-Agent shared with {@link ReleaseDiscovery} so
+     * every updater request identifies the application.
+     */
+    private static final String USER_AGENT_HEADER =
+            ReleaseDiscovery.USER_AGENT_HEADER;
+
+    /** Longest URL text echoed in an error message. */
+    private static final int MAX_REPORTED_URL_CHARS = 200;
+
     /** Download stream read buffer size. */
     private static final int DOWNLOAD_BUFFER_BYTES = 8192;
 
@@ -85,6 +95,7 @@ public class DownloadManager {
             long maxBytes) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(toUri(url))
+                .header("User-Agent", USER_AGENT_HEADER)
                 .timeout(REQUEST_TIMEOUT)
                 .GET()
                 .build();
@@ -99,9 +110,11 @@ public class DownloadManager {
         }
 
         if (response.statusCode() != HTTP_OK) {
+            response.body().close();
             Files.deleteIfExists(targetPath);
             throw new IOException("Download failed: HTTP "
-                    + response.statusCode() + " for " + url);
+                    + response.statusCode() + " for "
+                    + describeUrl(url));
         }
 
         long declared = response.headers()
@@ -149,14 +162,17 @@ public class DownloadManager {
             throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(toUri(url))
+                .header("User-Agent", USER_AGENT_HEADER)
                 .timeout(REQUEST_TIMEOUT)
                 .GET()
                 .build();
         HttpResponse<InputStream> response = client.send(
                 request, HttpResponse.BodyHandlers.ofInputStream());
         if (response.statusCode() != HTTP_OK) {
+            response.body().close();
             throw new IOException("Download failed: HTTP "
-                    + response.statusCode() + " for " + url);
+                    + response.statusCode() + " for "
+                    + describeUrl(url));
         }
         java.io.ByteArrayOutputStream buffer =
                 new java.io.ByteArrayOutputStream();
@@ -183,6 +199,18 @@ public class DownloadManager {
                     "invalid download URL supplied by the"
                             + " release metadata", e);
         }
+    }
+
+    /**
+     * Bounded URL rendering for error messages so a hostile
+     * metadata-supplied URL cannot produce unbounded terminal output.
+     */
+    private static String describeUrl(String url) {
+        if (url.length() <= MAX_REPORTED_URL_CHARS) {
+            return url;
+        }
+        return url.substring(BUFFER_START, MAX_REPORTED_URL_CHARS)
+                + "...";
     }
 
     private static MessageDigest sha256() {

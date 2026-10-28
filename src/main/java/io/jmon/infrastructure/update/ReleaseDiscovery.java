@@ -43,6 +43,12 @@ public class ReleaseDiscovery {
     private static final String ACCEPT_HEADER =
             "application/vnd.github.v3+json";
 
+    /**
+     * Identifying User-Agent sent on every updater HTTP request (API,
+     * artifact and checksum downloads share it).
+     */
+    static final String USER_AGENT_HEADER = "jmon-self-updater";
+
     /** HTTP success status. */
     private static final int HTTP_OK = 200;
 
@@ -63,6 +69,7 @@ public class ReleaseDiscovery {
         this(HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(
                         CONNECT_TIMEOUT_SECONDS))
+                .followRedirects(HttpClient.Redirect.NORMAL)
                 .build(),
                 Duration.ofSeconds(REQUEST_TIMEOUT_SECONDS));
     }
@@ -71,6 +78,11 @@ public class ReleaseDiscovery {
     public ReleaseDiscovery(HttpClient client, Duration requestTimeout) {
         this.client = client;
         this.requestTimeout = requestTimeout;
+    }
+
+    /** Exposes the production client's redirect policy for tests. */
+    HttpClient.Redirect redirectPolicy() {
+        return client.followRedirects();
     }
 
     /**
@@ -147,6 +159,7 @@ public class ReleaseDiscovery {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(LATEST_RELEASE_URL))
                 .header("Accept", ACCEPT_HEADER)
+                .header("User-Agent", USER_AGENT_HEADER)
                 .timeout(requestTimeout)
                 .GET()
                 .build();
@@ -155,15 +168,17 @@ public class ReleaseDiscovery {
         try {
             HttpResponse<InputStream> response = client.send(
                     request, HttpResponse.BodyHandlers.ofInputStream());
-            if (response.statusCode() == HTTP_NOT_FOUND) {
-                return DiscoveryOutcome.noRelease();
+            try (InputStream responseBody = response.body()) {
+                if (response.statusCode() == HTTP_NOT_FOUND) {
+                    return DiscoveryOutcome.noRelease();
+                }
+                if (response.statusCode() != HTTP_OK) {
+                    return DiscoveryOutcome.error(
+                            "GitHub API returned HTTP "
+                                    + response.statusCode());
+                }
+                body = boundedRead(responseBody);
             }
-            if (response.statusCode() != HTTP_OK) {
-                return DiscoveryOutcome.error(
-                        "GitHub API returned HTTP "
-                                + response.statusCode());
-            }
-            body = boundedRead(response.body());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return DiscoveryOutcome.error("Discovery was interrupted");
@@ -240,7 +255,6 @@ public class ReleaseDiscovery {
             }
             buffer.write(chunk, BUFFER_START, read);
         }
-        in.close();
         return buffer.toString(StandardCharsets.UTF_8);
     }
 }
