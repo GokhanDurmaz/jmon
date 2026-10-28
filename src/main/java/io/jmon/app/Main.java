@@ -14,6 +14,7 @@ import io.jmon.infrastructure.diagnostics.JcmdDeepDiagnostics;
 import io.jmon.infrastructure.jvm.AttachJvmConnectionSource;
 import io.jmon.infrastructure.system.OshiTargetProcessCollector;
 import io.jmon.infrastructure.system.RealSystemMetricsCollector;
+import io.jmon.infrastructure.update.UpdateManager;
 import io.jmon.presentation.tui.Tui;
 import io.jmon.presentation.tui.view.TuiRenderer;
 
@@ -22,6 +23,12 @@ public class Main {
 
     /** Exit code signalling invalid CLI usage (non-zero, non-doc). */
     private static final int USAGE_ERROR_EXIT_CODE = 2;
+
+    /** Exit code signalling success. */
+    private static final int SUCCESS_EXIT_CODE = 0;
+
+    /** Exit code signalling a failed self-update attempt. */
+    private static final int UPDATE_FAILED_EXIT_CODE = 1;
 
     /** Smallest accepted leak-observation window in minutes. */
     private static final int MIN_LEAK_WINDOW_MINUTES = 1;
@@ -34,8 +41,8 @@ public class Main {
 
     /** Corroboration samples required per history window by the analyzer. */
     private static final int LEAK_MIN_CORROBORATION_SAMPLES = 4;
-/** CLI entry point orchestrating the monitoring session. */
 
+    /** CLI entry point orchestrating the monitoring session. */
     public static void main(String[] args) {
         String version = System.getProperty("jmon.version", "development");
 
@@ -47,6 +54,11 @@ public class Main {
 
             if ("--help".equals(arg) || "-h".equals(arg)) {
                 printUsage();
+                return;
+            }
+
+            if ("--update".equals(arg) || "-u".equals(arg)) {
+                System.exit(performUpdate(new UpdateManager()));
                 return;
             }
         }
@@ -87,6 +99,26 @@ public class Main {
                 new JcmdDeepDiagnostics(config.getDiagnosticsDir())
         );
         tui.start();
+    }
+
+    /**
+     * Runs the self-update flow and reports the outcome on stdout.
+     *
+     * @param updateManager update orchestration
+     * @return process exit code
+     */
+    static int performUpdate(UpdateManager updateManager) {
+        UpdateManager.UpdateOutcome outcome = updateManager.performUpdate();
+        System.out.println(outcome.message());
+        switch (outcome.state()) {
+            case COMPLETED:
+            case UP_TO_DATE:
+            case NO_RELEASE:
+                return SUCCESS_EXIT_CODE;
+            case FAILED:
+            default:
+                return UPDATE_FAILED_EXIT_CODE;
+        }
     }
 
     static MonitorConfiguration.Builder configureSpringBoot(
@@ -135,7 +167,7 @@ public class Main {
         try {
             long minutes = Long.parseLong(value);
             if (minutes < MIN_LEAK_WINDOW_MINUTES
-                        || minutes > MAX_LEAK_WINDOW_MINUTES) {
+                    || minutes > MAX_LEAK_WINDOW_MINUTES) {
                 throw new IllegalArgumentException(
                         "--leak-window-minutes must be between 1 and 1440,"
                                 + " got " + value);
@@ -155,6 +187,7 @@ public class Main {
         System.out.println("  jmon --pid <java-process-id> [options]");
         System.out.println("  jmon --version, -v");
         System.out.println("  jmon --help, -h");
+        System.out.println("  jmon --update, -u");
         System.out.println();
         System.out.println("Options:");
         System.out.println("  --spring-endpoint <url>");

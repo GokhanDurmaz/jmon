@@ -88,7 +88,52 @@ The Windows installer requires a published GitHub Release containing `jmon-windo
 
 ## Updating JMon
 
-To update JMon, run the installation command again for your platform. The installer downloads the latest published release.
+Installed JMon instances can update themselves; see [Self-Update](#self-update) below.
+
+### Self-Update
+
+```bash
+jmon --update
+```
+
+The self-update flow:
+
+1. Reads the installed version from the installed launcher script
+   (`~/.local/opt/jmon/bin/jmon` by default). If the installed version
+   cannot be determined reliably, the update aborts rather than guessing.
+2. Queries the GitHub API for the latest stable release (`vX.Y.Z` tags
+   only; drafts and prereleases are never used).
+3. Selects the artifact for your platform (`jmon.tar.gz` on macOS/Linux,
+   `jmon-windows.zip` on Windows) together with its published
+   checksum file, verifying SHA-256 of the download.
+4. Extracts and validates the archive — sanitized paths, no symlinks,
+   bounded sizes — into a staging directory on the same filesystem.
+5. Swaps the old installation aside atomically, installs the new one,
+   and rolls the old version back automatically if the swap fails.
+
+No download or install happens without successful checksum verification,
+and nothing is modified until the new version is fully staged and
+validated. Network/connection errors are reported as failures and are
+never mistaken for "no update available". Progress and errors are printed
+to the terminal; exit code 2 is reserved for invalid CLI usage and a
+failed update exits non-zero.
+
+Notes and limitations:
+
+- Running JMon from a source checkout (for example `gradlew run`) reports
+  a non-release version; `--update` intentionally refuses to run so dev
+  builds are never overwritten.
+- The checksum file itself comes from the same GitHub release channel,
+  which protects against corrupted or truncated downloads but is not a
+  cryptographic publisher signature.
+- Credentials and endpoints are not involved: the update flow is
+  read-only towards GitHub and never sends local data anywhere.
+
+### Reinstalling manually
+
+To update JMon outside the self-update flow, run the installation command
+again for your platform. The installer downloads the latest published
+release and installs it.
 
 For macOS and Linux, run:
 
@@ -282,6 +327,16 @@ jmon -v
 ```bash
 jmon --help
 ```
+
+### Self-update
+
+```bash
+jmon --update
+```
+
+Downloads and installs the latest stable release after verifying its
+SHA-256 checksum. See [Self-Update](#self-update) for details and
+limitations.
 
 ### Run from the source code
 
