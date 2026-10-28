@@ -150,3 +150,47 @@ TEST CONTENT
   verified by a temporary canary reverting the gate), collection resumes exactly after the
   interval elapses, and quit stops the loop. Battery: clean check build EXIT 0, 183 tests/
   0 failures; WORKSPACE_EDIT_TEST.md untouched. Manual interactive verification still required.
+
+## Session record — 2026-10-28 (self-update feature: production + test suite, build green)
+- Implemented `jmon --update` / `-u` self-update (pure JDK, no new dependencies), package
+  io.jmon.infrastructure.update wired into app.Main: outcome-based exit codes
+  (COMPLETED/UP_TO_DATE/NO_RELEASE -> 0, FAILED -> 1, usage errors keep exit 2); help text
+  documents --update. NOT committed/pushed/tagged/published; all changes staged in working
+  tree only. Live end-to-end update verification not attempted (would mutate this machine's
+  installation).
+- Production components: ReleaseDiscovery (GitHub /releases/latest, Jackson, v-tag only),
+  ReleaseInfo, VersionComparator, PathResolver (install dir invocation-independent),
+  InstalledVersionReader (parses -Djmon.version from installed launcher, never guesses),
+  ArtifactSelector (POSIX jmon.tar.gz+bin/jmon, WINDOWS jmon-windows.zip+bin/jmon.bat,
+  requires exactly one artifact + one .sha256), DownloadManager (bounded streams 512 MiB cap,
+  SHA-256 while streaming, downloadText 8 KiB cap, partial-file cleanup), ChecksumVerifier
+  (sha256sum format, constant-time MessageDigest.isEqual), TarReader (strict ustar, GNU L +
+  pax x path headers, symlink/hardlink/link types rejected, 50k entries / 1 GiB payload caps,
+  exact realignment after variable-size entries), Installer (stage to workDir/extract/jmon,
+  traversal/NUL/absolute-path rejection, launcher validation + executability, zip entry caps,
+  atomic ATOMIC_MOVE swap with rollback preserving backup), UpdateManager (temp workspace
+  jmon-update-<ts> on installRoot.parent, sanitize() strips URLs from exception messages,
+  State enum UP_TO_DATE/NO_RELEASE/COMPLETED/FAILED, UpdateOutcome record).
+- Test suite: 64 tests across 9 test classes + TestArchives fixture (real in-memory ustar
+  builder with GNU longname, pax headers, gzip; hand-built duplicate-name zip). Coverage:
+  tar round-trip/streaming/GNU/pax/symlink/truncation, posix+windows staging, launcher
+  validation, traversal/absolute paths, swap success/rollback, download digest/HTTP
+  errors/size caps/streaming bombs/malformed URLs, discovery 404/500/network/malformed JSON,
+  checksum parse+verify, version readers, semver compare, unsupported OS refusal ("SunOS";
+  note ko "Win32 console" maps to WINDOWS), manager-only end-to-end COMPLETED flow with
+  checksum-mismatch / missing-checksum / oversized-precheck leave-install-intact assertions.
+- Static analysis: clean checkstyleMain + checkstyleTest + pmdMain + pmdTest for the update
+  package after fixing ImportOrder (statics sorted by FQN inside the org group, no blank
+  lines within the group; statics-junit-first, org.junit.jupiter.api.* next, statics
+  org.mockito.* last) and EmptyLineSeparator (blank line before every member) violations in
+  the test sources. Full battery: `./gradlew clean check build` BUILD SUCCESSFUL; remaining
+  warnings are pre-existing review-tier items only (FileLength warnings Installer 440 lines,
+  TarReader 469 lines; PMD review findings in other packages: 107 main / 8 test priority-3).
+- Project style conventions discovered (checkstyle.xml + passing files): import groups
+  java./javax. -> (com|net|org|oshi). -> io.jmon., separated by blank lines; MagicNumber
+  handled via named constants plus same-line `// magic-exempt: <reason>` comments
+  (SuppressWithNearbyCommentFilter influence 0); tests are exempt from MagicNumber/Javadoc.
+- Docs: README rewritten for self-update (flow, exit codes, limitations incl. checksum file
+  not a publisher signature and dev builds refusing to update), plus a new CLI help snippet.
+- WORKSPACE_EDIT_TEST.md untouched (untracked). Remaining: create the self-update --update
+  CLI interactive verification on real terminals, and eventually the update commit/push/tag.
