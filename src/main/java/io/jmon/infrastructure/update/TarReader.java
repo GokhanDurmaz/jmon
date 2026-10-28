@@ -14,7 +14,10 @@ import java.util.List;
  *
  * <p>Only regular files and directories are accepted; symlinks,
  * hardlinks, devices and FIFOs are rejected. Entry count and total
- * payload bytes are bounded to resist decompression bombs. Payload
+ * payload bytes are bounded to resist decompression bombs. GNU
+ * long-name and pax metadata records are individually size-capped
+ * before their bytes are read into memory, and pax global headers are
+ * skipped without buffering. Payload
  * bytes are surfaced to callers through the {@link EntryVisitor}
  * streaming API; no filesystem extraction happens inside this class.</p>
  */
@@ -28,6 +31,12 @@ public class TarReader {
 
     /** Reasonable ceiling for payload bytes across the archive. */
     static final long MAX_TOTAL_PAYLOAD_BYTES = 1024L * 1024 * 1024;
+
+    /** Ceiling for a single GNU long-name record's payload bytes. */
+    static final long MAX_LONG_NAME_BYTES = 4096L;
+
+    /** Ceiling for a single pax extended/global record's bytes. */
+    static final long MAX_PAX_HEADER_BYTES = 8192L;
 
     private static final int NAME_OFFSET = 0;
     private static final int MODE_OFFSET = 100;
@@ -184,16 +193,18 @@ public class TarReader {
 
             switch (type) {
                 case TYPE_LONG_NAME:
-                    longName = readBytesAndPad(in, size);
+                    longName = readBytesAndPad(in, size,
+                            MAX_LONG_NAME_BYTES);
                     longNamePending = true;
                     continue;
                 case TYPE_PAX_EXTENDED:
-                    paxPathPending = readPaxPath(in, size);
+                    paxPathPending = readPaxPath(in, size,
+                            MAX_PAX_HEADER_BYTES);
                     longNamePending = false;
                     longName = null;
                     continue;
                 case TYPE_PAX_GLOBAL:
-                    readBytesAndPad(in, size);
+                    drain(in, size, NO_PAYLOAD_BYTES);
                     longNamePending = false;
                     longName = null;
                     continue;
@@ -382,8 +393,9 @@ public class TarReader {
         return name.toString();
     }
 
-    private static String readBytesAndPad(InputStream in, long size)
-            throws IOException {
+    private static String readBytesAndPad(InputStream in, long size,
+            long maxBytes) throws IOException {
+        requireMetadataCapacity(size, maxBytes);
         byte[] data = new byte[(int) size];
         int off = 0; // magic-exempt: buffer position initial value
         while (off < size) {
@@ -402,15 +414,32 @@ public class TarReader {
                 StandardCharsets.UTF_8);
     }
 
-    private static String readPaxPath(InputStream in, long size)
-            throws IOException {
-        String content = readBytesAndPad(in, size);
+    private static String readPaxPath(InputStream in, long size,
+            long maxBytes) throws IOException {
+        String content = readBytesAndPad(in, size, maxBytes);
         for (String line : content.split("\n")) {
             if (line.startsWith(PAX_PATH_KEY)) {
                 return line.substring(PAX_PATH_KEY.length());
             }
         }
         return null;
+    }
+
+    /**
+     * Rejects oversized or negative metadata record sizes before any
+     * bytes are read or buffered, so a hostile size field can never
+     * drive allocation.
+     */
+    private static void requireMetadataCapacity(long size, long maxBytes)
+            throws IOException {
+        if (size < NO_PAYLOAD_BYTES) { // magic-exempt: negative-size guard against malformed records
+            throw new IOException("malformed metadata record size "
+                    + size);
+        }
+        if (size > maxBytes) {
+            throw new IOException("metadata record exceeds " + maxBytes
+                    + " byte limit");
+        }
     }
 
     /**

@@ -171,8 +171,37 @@ final class TestArchives {
 
     private static void writeEntry(OutputStream out, TarEntry entry)
             throws IOException {
+        writeHeaderBlock(out, entry.name(), entry.typeflag(),
+                pad(entry.payload().length, 11) + "\0", entry.mode(),
+                entry.payload());
+    }
+
+    /**
+     * Builds a single-header archive that declares an explicit octal
+     * size field without providing matching payload bytes. Used to
+     * exercise the reader's metadata size limits (the header must be
+     * rejected before any payload read).
+     *
+     * @param name      header name field, e.g. ././@LongLink
+     * @param typeflag  tar type indicator, e.g. 'L' or 'x'
+     * @param octalSize size field digits, e.g. "10001"
+     * @return tar bytes: one header block plus the end-of-archive marker
+     * @throws IOException when the builder fails
+     */
+    static byte[] rawSizedHeader(String name, byte typeflag,
+            String octalSize) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        writeHeaderBlock(out, name, typeflag, octalSize + "\0", 0644,
+                new byte[0]);
+        out.write(new byte[BLOCK_SIZE * 2]);
+        return out.toByteArray();
+    }
+
+    private static void writeHeaderBlock(OutputStream out, String name,
+            byte typeflag, String sizeField, int mode, byte[] payload)
+            throws IOException {
         byte[] header = new byte[BLOCK_SIZE];
-        byte[] nameBytes = entry.name().getBytes(StandardCharsets.UTF_8);
+        byte[] nameBytes = name.getBytes(StandardCharsets.UTF_8);
         if (nameBytes.length > NAME_LENGTH) {
             byte[] prefix = Arrays.copyOfRange(nameBytes,
                     NAME_LENGTH - 1, nameBytes.length);
@@ -181,12 +210,12 @@ final class TestArchives {
                     + " overflow bytes)");
         }
         System.arraycopy(nameBytes, 0, header, 0, nameBytes.length);
-        writeField(header, 100, pad(entry.mode(), 7) + "\0");
+        writeField(header, 100, pad(mode, 7) + "\0");
         writeField(header, 108, pad(0, 7) + "\0");
         writeField(header, 116, pad(0, 7) + "\0");
-        writeField(header, 124, pad(entry.payload().length, 11) + "\0");
+        writeField(header, 124, sizeField);
         writeField(header, 136, pad(0, 11) + "\0");
-        header[TYPE_OFFSET] = entry.typeflag();
+        header[TYPE_OFFSET] = typeflag;
         writeField(header, MAGIC_OFFSET, "ustar\00000");
         writeField(header, 265, "test\0");
         writeField(header, 297, "test\0");
@@ -201,9 +230,9 @@ final class TestArchives {
         writeField(header, CHECKSUM_FIELD_OFFSET,
                 String.format("%06o\0 ", checksum));
         out.write(header);
-        if (entry.payload().length > 0) {
-            out.write(entry.payload());
-            int remainder = entry.payload().length % BLOCK_SIZE;
+        if (payload.length > 0) {
+            out.write(payload);
+            int remainder = payload.length % BLOCK_SIZE;
             if (remainder > 0) {
                 out.write(new byte[BLOCK_SIZE - remainder]);
             }
