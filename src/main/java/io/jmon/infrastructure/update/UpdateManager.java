@@ -350,15 +350,39 @@ public class UpdateManager {
                     DownloadManager.MAX_ARTIFACT_BYTES);
 
             out.println("Verifying SHA-256 checksum...");
-            if (!ChecksumVerifier.verify(downloaded.sha256Hex(),
-                    publishedChecksum)) {
-                return new UpdateOutcome(State.FAILED,
-                        "Checksum verification failed: the downloaded"
-                                + " artifact does not match the"
-                                + " published SHA-256 digest. Nothing"
-                                + " was installed. Next step: retry, or"
-                                + " report the incident if it"
-                                + " repeats.");
+            ChecksumVerifier.Verification verification = ChecksumVerifier
+                    .verify(downloaded.sha256Hex(), publishedChecksum,
+                            selected.artifact().name());
+            switch (verification.status()) {
+                case VERIFIED:
+                    break;
+                case REFERENCE_MISSING:
+                    return new UpdateOutcome(State.FAILED,
+                            "Checksum verification failed: the"
+                                    + " published checksum file does not"
+                                    + " contain an entry for "
+                                    + selected.artifact().name()
+                                    + ". Nothing was installed. Next"
+                                    + " step: retry, or report the"
+                                    + " incident if it repeats.");
+                case REFERENCE_AMBIGUOUS:
+                    return new UpdateOutcome(State.FAILED,
+                            "Checksum verification failed: the"
+                                    + " published checksum file contains"
+                                    + " conflicting digests for "
+                                    + selected.artifact().name()
+                                    + ". Nothing was installed. Next"
+                                    + " step: retry, or report the"
+                                    + " incident if it repeats.");
+                case DIGEST_MISMATCH:
+                default:
+                    return new UpdateOutcome(State.FAILED,
+                            "Checksum verification failed: the"
+                                    + " downloaded artifact does not"
+                                    + " match the published SHA-256"
+                                    + " digest. Nothing was installed."
+                                    + " Next step: retry, or report the"
+                                    + " incident if it repeats.");
             }
 
             out.println("Staging update...");

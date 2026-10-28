@@ -181,6 +181,23 @@ class UpdateManagerTest {
                 manager(installRoot, "Linux").performUpdate();
         assertEquals(UpdateManager.State.FAILED, outcome.state());
         assertTrue(outcome.message().contains("Checksum verification"));
+        assertTrue(outcome.message().contains("does not match"));
+        assertEquals("v0.2.0", launcherVersion(installRoot));
+    }
+
+    @Test
+    void failsWhenTheChecksumFileNamesADifferentArtifact()
+            throws Exception {
+        Path installRoot = installed("v0.2.0");
+        byte[] archive = TestArchives.posixReleaseTarGz("v0.3.0");
+        givenRelease("v0.3.0", archive);
+        when(downloader.downloadText(anyString())).thenReturn(
+                sha256(archive) + "  jmon-windows.zip\n");
+        UpdateManager.UpdateOutcome outcome =
+                manager(installRoot, "Linux").performUpdate();
+        assertEquals(UpdateManager.State.FAILED, outcome.state());
+        assertTrue(outcome.message().contains("entry for jmon.tar.gz"));
+        assertFalse(outcome.message().contains("does not match"));
         assertEquals("v0.2.0", launcherVersion(installRoot));
     }
 
