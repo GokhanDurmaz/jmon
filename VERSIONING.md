@@ -88,11 +88,16 @@ generated release notes.
 
 - `v0.2.0` - previous published release (Spring Boot Actuator monitoring,
   layered architecture, memory analysis, diagnostics, QA gates).
-- `v0.2.1` - current published release
+- `v0.2.1` - previous published release
   (https://github.com/GokhanDurmaz/jmon/releases/tag/v0.2.1): patch
   regression fix for the TUI refresh schedule (keyboard wake-ups
   triggering unscheduled metrics collection), verified by branch CI and
   the tag-triggered release workflow.
+- `v0.3.0` - current published release
+  (https://github.com/GokhanDurmaz/jmon/releases/tag/v0.3.0): self-update
+  feature (`jmon --update`) with SHA-256 checksum verification, validated
+  extraction and an atomic install swap, verified by branch CI and the
+  tag-triggered release workflow.
 
 ## 4. Standard Release Workflow
 
