@@ -194,3 +194,34 @@ TEST CONTENT
   not a publisher signature and dev builds refusing to update), plus a new CLI help snippet.
 - WORKSPACE_EDIT_TEST.md untouched (untracked). Remaining: create the self-update --update
   CLI interactive verification on real terminals, and eventually the update commit/push/tag.
+
+## Session record — 2026-10-28 (update-package hardening: M4-F1 zip backslash names, M4-F2 tar top-level rule)
+- M4 read-only audit traced the release pipeline (release.yml: installDist + `tar -czf`/`zip`
+  with a `jmon/` top-level directory, sha256sum sidecars naming the exact asset) against the
+  update flow and found the layouts compatible end to end; two hardening gaps were confirmed
+  and fixed below. Both fixes were validated before committing; tests were not rerun after
+  the commits.
+- M4-F1 (commit 0ff7b841fb27084d5d766667700cf2d16eced57f, "fix: reject backslash names in
+  update zip entries"): Installer.validateZipName now rejects ZIP entry names containing
+  backslashes during the pre-write validation pass — on Windows java.nio.file reinterprets
+  '\' as a separator after validation, which would let "jmon/bin\..\..\evil.bat" escape
+  containment; tar entry names (POSIX extraction only) keep accepting literal backslashes.
+  Two regression tests added (traversal-style and plain backslash names; assertions prove
+  nothing is extracted and no hostile file exists anywhere in the test tree). Focused
+  InstallerTest: 21 passed, 0 failures/errors; full `./gradlew clean check build`: 289
+  passed, 0 failures/errors — all observed before the commit.
+- M4-F2 (commit 1950b9115e6fe0adddab4a644e6073fee0908d2a, "fix: enforce single top-level
+  directory in tar extraction"): extractTarGz now validates every archive entry in a first
+  pass (tarReader.read on a freshly opened stream) and reopens the archive for extraction,
+  so nothing is written unless all entries pass; new validateTarName requires every TAR
+  entry to belong to the jmon/ top-level package directory (same message text as the zip
+  check), matching the zip rule. Four regression tests added: valid jmon/ layout accepted,
+  unrelated top-level file rejected, unrelated top-level directory rejected, jmon-evil/
+  lookalike rejected — each rejection leaves the extract directory empty. Focused
+  InstallerTest: 25 passed, 0 failures/errors; full battery: 293 passed, 0 failures/errors —
+  all observed before the commit. Checkstyle reported only the three pre-existing FileLength
+  warnings. PMD review findings increased from 110 to 111 because the Installer class
+  crossed the configured NCSS review threshold (class NCSS 250 = classReportLevel 250,
+  verified against a scratch HEAD-baseline pmdReviewMain run); this is report-only and did
+  not fail the build. GitHub Actions CI for commit 1950b91 was reported successful.
+- WORKSPACE_EDIT_TEST.md and bin/ untouched (untracked) throughout.
