@@ -225,3 +225,41 @@ TEST CONTENT
   verified against a scratch HEAD-baseline pmdReviewMain run); this is report-only and did
   not fail the build. GitHub Actions CI for commit 1950b91 was reported successful.
 - WORKSPACE_EDIT_TEST.md and bin/ untouched (untracked) throughout.
+
+## Session record — 2026-10-30 (Windows self-update swap failure fixed)
+- Reported failure (v0.3.0 -> v0.3.1 on Windows): `IOException: cannot move
+  the current installation aside: Check that no JMon process keeps files
+  open under %USERPROFILE%\.local\opt\jmon ...`.
+- Root cause (verified, not a file lock/AV/permission issue): Installer.swapWithBackup
+  pre-created the backup via Files.createTempDirectory AT the path used as the move
+  target, then issued Files.move(currentRoot, backup, ATOMIC_MOVE) without
+  REPLACE_EXISTING onto that existing (empty) directory. POSIX rename(2) silently
+  replaces an empty target directory (verified empirically on macOS with a scratch
+  JVM), so macOS/Linux updates always worked; on Windows the JDK's ATOMIC_MOVE maps
+  to MoveFileEx flagged MOVEFILE_REPLACE_EXISTING, and Microsoft documents that this
+  errors whenever the destination names an existing directory — OpenJDK 17
+  sun.nio.fs.WindowsFileCopy.move confirmed to issue that exact call. Installer
+  wrapped the rename failure into the observed message on every Windows run.
+- Fix: package-private Installer.reserveBackupPath reserves the backup name via
+  Files.createTempDirectory and immediately deletes the empty dir, so the atomic
+  move targets a non-existing path on both platforms; swapWithBackup uses it.
+  Rollback/recovery semantics untouched (recovery ignores empty jmon-backup-*
+  strays; no pre-created dir is left behind anymore); POSIX behavior unchanged;
+  error handling not weakened (delete/reserve failures propagate as IOException
+  before any installation or marker change).
+- Regression tests (InstallerTest 25 -> 28): reservesAUniqueNonExistingBackupMoveTarget
+  (pins the Windows-critical invariant: reserved backup move target never
+  pre-exists, unique, stays in the jmon-backup-* family used by recovery);
+  preservesTheInstallationWhenTheSwapReserveFails (a reserve failure aborts before
+  the swap marker or the installation change); swapSuccessLeavesNoEmptyBackupReservationBehind
+  (after a successful swap the parent holds exactly one non-empty retired backup).
+- Verification: focused update package `./gradlew test --tests
+  'io.jmon.infrastructure.update.*'` = 113 tests, 0 failures/errors; full
+  `./gradlew clean check` BUILD SUCCESSFUL (296 tests, 0 failures/errors;
+  checkstyleMain/Test + pmdMain/Test 0 errors; Installer.java exactly 600 lines =
+  FileLength failure threshold; magic-number policy honored).
+- Platform verification limits: Windows execution was NOT available — the Windows
+  rename semantics are verified at API level (OpenJDK WindowsFileCopy source +
+  Microsoft MoveFileEx MOVEFILE_REPLACE_EXISTING documentation); pre-fix POSIX
+  success and post-fix success were verified empirically on macOS. Nothing was
+  committed/pushed/tagged; WORKSPACE_EDIT_TEST.md and bin/ (untracked) untouched.
