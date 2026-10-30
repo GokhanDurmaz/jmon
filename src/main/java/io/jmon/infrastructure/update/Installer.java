@@ -447,8 +447,7 @@ public class Installer {
             throw new IOException(
                     "installation paths must be absolute for the swap");
         }
-        Path backup = Files.createTempDirectory(
-                currentRoot.getParent(), BACKUP_PREFIX);
+        Path backup = reserveBackupPath(currentRoot.getParent());
         Path marker = InterruptedSwapRecovery
                 .swapMarker(currentRoot);
         try {
@@ -493,6 +492,20 @@ public class Installer {
         Path retired = markBackupRetired(backup);
         deleteQuietly(marker);
         return retired;
+    }
+
+    // Reserves a unique, ABSENT sibling location in parent for a
+    // swap's first atomic move. Windows requires the absent target:
+    // ATOMIC_MOVE maps to MoveFileEx flagged MOVEFILE_REPLACE_EXISTING,
+    // which errors whenever the destination names a directory even
+    // when empty, while POSIX rename(2) replaces an empty target.
+    // Creation then immediate deletion reserves a filesystem-guaranteed
+    // unique name; a deletion failure surfaces unchanged and leaves an
+    // empty jmon-backup-* stray that swap recovery ignores.
+    static Path reserveBackupPath(Path parent) throws IOException {
+        Path reserved = Files.createTempDirectory(parent, BACKUP_PREFIX);
+        Files.delete(reserved);
+        return reserved;
     }
 
     /**

@@ -13,6 +13,7 @@ import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -254,6 +255,72 @@ class InstallerTest {
         assertFalse(Files.exists(backup));
         assertFalse(Files.exists(installRoot.resolveSibling(
                 Installer.SWAP_MARKER_NAME)));
+    }
+
+    @Test
+    void preservesTheInstallationWhenTheSwapReserveFails()
+            throws IOException {
+        Path installRoot = temp.resolve("jmon");
+        Files.createDirectories(installRoot.resolve("bin"));
+        Files.writeString(installRoot.resolve("bin/jmon"), "old");
+        // An unwritable installation parent cannot be simulated
+        // portably; a missing parent fails the reservation through the
+        // same first filesystem operation instead.
+        Path missingParent = temp.resolve("absent");
+        assertThrows(IOException.class, () -> installer.swapWithBackup(
+                missingParent.resolve("jmon"), temp.resolve("stage")));
+        assertFalse(Files.exists(installRoot.resolveSibling(
+                Installer.SWAP_MARKER_NAME)));
+        assertEquals("old", Files.readString(
+                installRoot.resolve("bin/jmon")));
+    }
+
+    @Test
+    void reservesAUniqueNonExistingBackupMoveTarget()
+            throws IOException {
+        // Windows maps the JDK's ATOMIC_MOVE to MoveFileEx with
+        // MOVEFILE_REPLACE_EXISTING, which reports an error when the
+        // destination names an existing directory even an empty one.
+        // The v0.3.0 Windows update failed exactly there because the
+        // swap pre-created the backup directory at the move target.
+        // The contract below pins the fix invariant on every platform.
+        Path first = Installer.reserveBackupPath(temp);
+        Path second = Installer.reserveBackupPath(temp);
+        assertFalse(Files.exists(first));
+        assertFalse(Files.exists(second));
+        assertTrue(first.getFileName().toString()
+                .startsWith(Installer.BACKUP_PREFIX));
+        assertTrue(second.getFileName().toString()
+                .startsWith(Installer.BACKUP_PREFIX));
+        assertNotEquals(first, second);
+    }
+
+    @Test
+    void swapSuccessLeavesNoEmptyBackupReservationBehind()
+            throws IOException {
+        Path installRoot = temp.resolve("jmon");
+        Files.createDirectories(installRoot.resolve("bin"));
+        Files.writeString(installRoot.resolve("bin/jmon"), "old");
+        Path staged = temp.resolve("stage");
+        Files.createDirectories(staged.resolve("bin"));
+        Files.writeString(staged.resolve("bin/jmon"), "new");
+        Path backup = installer.swapWithBackup(installRoot, staged);
+        try (var children = Files.list(temp)) {
+            List<Path> backupFamily = children
+                    .filter(path -> {
+                        String name = path.getFileName().toString();
+                        return name.startsWith(Installer.BACKUP_PREFIX)
+                                || name
+                                .startsWith(Installer.SUCCESS_PREFIX);
+                    })
+                    .toList();
+            assertEquals(List.of(backup), backupFamily);
+        }
+        assertEquals("new", Files.readString(
+                installRoot.resolve("bin/jmon")));
+        assertEquals("old", Files.readString(
+                backup.resolve("bin/jmon")));
+        Installer.deleteQuietly(backup);
     }
 
     @Test
