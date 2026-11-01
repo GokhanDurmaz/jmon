@@ -10,6 +10,7 @@ import java.util.Optional;
 import java.util.OptionalDouble;
 
 import org.jline.terminal.Terminal;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -556,6 +557,154 @@ class TuiRendererTest {
         }
         assertTrue(rows.get(1).endsWith(" DISCONNECTED"), // magic-exempt: first element index
                 "Second logo row must carry the status text");
+    }
+
+    @Test
+    @DisplayName("Resize: dimension change clears the screen once per size; equal sizes do not")
+    void testResizeFullClearsOnlyOnDimensionChange() {
+        StringWriter writer = new StringWriter();
+        Terminal resizeTerminal = mock(Terminal.class);
+        when(resizeTerminal.writer()).thenReturn(new PrintWriter(writer));
+
+        int[] size = {100, 60};
+        when(resizeTerminal.getWidth()).thenAnswer(inv -> size[0]);
+        when(resizeTerminal.getHeight()).thenAnswer(inv -> size[1]);
+
+        TuiRenderer resizeRenderer = new TuiRenderer();
+
+        resizeRenderer.render(resizeTerminal, systemDefaults(),
+                processDefaults(), jvmDefaults(), healthOk(), "Status",
+                List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0,
+                Optional.empty());
+
+        size[1] = 20;
+        resizeRenderer.render(resizeTerminal, systemDefaults(),
+                processDefaults(), jvmDefaults(), healthOk(), "Status",
+                List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0,
+                Optional.empty());
+
+        size[1] = 20;
+        resizeRenderer.render(resizeTerminal, systemDefaults(),
+                processDefaults(), jvmDefaults(), healthOk(), "Status",
+                List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0,
+                Optional.empty());
+
+        size[1] = 60;
+        resizeRenderer.render(resizeTerminal, systemDefaults(),
+                processDefaults(), jvmDefaults(), healthOk(), "Status",
+                List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0,
+                Optional.empty());
+
+        String output = writer.toString();
+        int clearCount = output.split(
+                java.util.regex.Pattern.quote("\033[2J"), -1).length - 1;
+
+        assertEquals(3, clearCount,
+                "First frame + shrink + enlarge must each clear once; "
+                        + "the repeated same-size frame must not");
+    }
+
+    @Test
+    @DisplayName("Resize: leftover-row erasure uses absolute rows inside the terminal height")
+    void testEraseRowsStayInsideTerminalHeight() {
+        StringWriter writer = new StringWriter();
+        Terminal eraseTerminal = mock(Terminal.class);
+        when(eraseTerminal.writer()).thenReturn(new PrintWriter(writer));
+
+        int[] size = {100, 60};
+        when(eraseTerminal.getWidth()).thenAnswer(inv -> size[0]);
+        when(eraseTerminal.getHeight()).thenAnswer(inv -> size[1]);
+
+        TuiRenderer eraseRenderer = new TuiRenderer();
+
+        SpringBootMetricsSnapshot snapshot = new SpringBootMetricsSnapshot(
+                List.of(
+                        new SpringBootMetric("m.one", 1.0, "", ""),
+                        new SpringBootMetric("m.two", 2.0, "", "")),
+                ProviderStatus.SUCCESS,
+                null
+        );
+
+        eraseRenderer.render(eraseTerminal, systemDefaults(),
+                processDefaults(), jvmDefaults(), healthOk(), "Status",
+                List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0,
+                Optional.of(snapshot));
+
+        eraseRenderer.render(eraseTerminal, systemDefaults(),
+                processDefaults(), jvmDefaults(), healthOk(), "Status",
+                List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0,
+                Optional.empty());
+
+        String output = writer.toString();
+
+        assertTrue(output.contains("SPRING BOOT METRICS"),
+                "First frame must include the Spring panel so the second "
+                        + "frame shrinks in row count");
+
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("\\033\\[(\\d+);1H")
+                .matcher(output);
+
+        int erasureRows = 0;
+        int maxRow = 0;
+
+        while (matcher.find()) {
+            int row = Integer.parseInt(matcher.group(1)); // magic-exempt: accumulator start value
+            erasureRows++;
+            maxRow = Math.max(maxRow, row);
+        }
+
+        assertTrue(erasureRows > 0,
+                "The shrunken frame must erase its leftover rows by cursor position");
+        assertTrue(maxRow <= 60,
+                "Erasure must stay inside the current terminal height");
+    }
+
+    @Test
+    @DisplayName("Resize: repeated resizes keep producing full clears without duplication")
+    void testRepeatedResizeWithoutRestart() {
+        StringWriter writer = new StringWriter();
+        Terminal churnTerminal = mock(Terminal.class);
+        when(churnTerminal.writer()).thenReturn(new PrintWriter(writer));
+
+        int[] size = {80, 24};
+        when(churnTerminal.getWidth()).thenAnswer(inv -> size[0]);
+        when(churnTerminal.getHeight()).thenAnswer(inv -> size[1]);
+
+        TuiRenderer churnRenderer = new TuiRenderer();
+
+        // Small -> large -> small -> large without restart.
+        size[0] = 80;
+        size[1] = 24;
+        churnRenderer.render(churnTerminal, systemDefaults(),
+                processDefaults(), jvmDefaults(), healthOk(), "Status",
+                List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0,
+                Optional.empty());
+        size[0] = 160;
+        size[1] = 60;
+        churnRenderer.render(churnTerminal, systemDefaults(),
+                processDefaults(), jvmDefaults(), healthOk(), "Status",
+                List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0,
+                Optional.empty());
+        size[0] = 80;
+        size[1] = 24;
+        churnRenderer.render(churnTerminal, systemDefaults(),
+                processDefaults(), jvmDefaults(), healthOk(), "Status",
+                List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0,
+                Optional.empty());
+        size[0] = 160;
+        size[1] = 60;
+        churnRenderer.render(churnTerminal, systemDefaults(),
+                processDefaults(), jvmDefaults(), healthOk(), "Status",
+                List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0,
+                Optional.empty());
+
+        String output = writer.toString();
+        int clearCount = output.split(
+                java.util.regex.Pattern.quote("\033[2J"), -1).length - 1;
+
+        assertEquals(4, clearCount,
+                "Every dimension transition must produce exactly one full clear");
     }
 
     @Test

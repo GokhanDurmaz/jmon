@@ -140,6 +140,12 @@ public class Tui {
 
             Attributes originalAttributes = terminal.enterRawMode();
 
+            Terminal.SignalHandler previousWinchHandler =
+                    terminal.handle(Terminal.Signal.WINCH, signal -> {
+                        // Redraw promptly at the new window dimensions.
+                        wakeRenderer();
+                    });
+
             try {
                 running.set(true);
 
@@ -222,6 +228,8 @@ public class Tui {
                 synchronized (shutdownLock) {
                     shutdownLock.notifyAll();
                 }
+
+                terminal.handle(Terminal.Signal.WINCH, previousWinchHandler);
 
                 if (springBootPoller != null) {
                     springBootPoller.stop();

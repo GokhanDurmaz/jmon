@@ -35,6 +35,9 @@ public class TuiRenderer {
     /** Selection index meaning "nothing selected in any list yet". */
     private static final int NO_SELECTION = -1;
 
+    /** Frame-dimension sentinel: no frame has been drawn to any size yet. */
+    private static final int NO_RENDER_DIMENSION = -1;
+
     /** Count meaning "no previous frame has been printed yet". */
     private static final int NO_FRAME_LINES = 0;
 
@@ -195,8 +198,9 @@ public class TuiRenderer {
     private final Deque<Double> systemRamHistory = new ArrayDeque<>();
     private final Deque<Double> heapHistory = new ArrayDeque<>();
 
-    private boolean firstFrameDrawn = false;
     private int lastFrameLineCount = NO_FRAME_LINES;
+    private int lastRenderWidth = NO_RENDER_DIMENSION;
+    private int lastRenderHeight = NO_RENDER_DIMENSION;
     private int classSelection = NO_SELECTION;
     private volatile AnalysisResult leakAnalysis;
     private volatile List<AnalysisEvent> leakEvents = List.of();
@@ -1452,25 +1456,33 @@ public class TuiRenderer {
     }
 
     private void drawFrame(Terminal terminal, List<String> lines) {
+        int width = terminal.getWidth();
+        int height = terminal.getHeight();
+
+        boolean dimensionChanged = width != lastRenderWidth
+                || height != lastRenderHeight;
+
         StringBuilder screen = new StringBuilder(
                 FRAME_BUFFER_BYTES_PER_LINE
                 * (lines.size() + FRAME_BORDERS_WIDTH));
 
         screen.append("\033[H");
 
-        if (!firstFrameDrawn) {
+        if (dimensionChanged) {
             screen.append("\033[2J");
-            firstFrameDrawn = true;
+            lastRenderWidth = width;
+            lastRenderHeight = height;
         }
 
         for (String line : lines) {
             screen.append(line).append("\033[0K").append('\n');
         }
 
-        for (int index = lines.size();
-             index < lastFrameLineCount;
-             index++) {
-            screen.append("\033[0K").append('\n');
+        int eraseTo = Math.min(lastFrameLineCount, height);
+
+        for (int row = lines.size() + 1; row <= eraseTo; row++) { // magic-exempt: intrinsic zero/one arithmetic operand
+            screen.append("\033[").append(row).append(";1H")
+                    .append("\033[2K");
         }
 
         lastFrameLineCount = lines.size();
