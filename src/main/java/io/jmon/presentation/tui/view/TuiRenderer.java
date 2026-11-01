@@ -179,6 +179,13 @@ public class TuiRenderer {
     public static final String RED = "\033[31m";
     public static final String CYAN = "\033[36m";
     public static final String BLUE = "\033[34m";
+    public static final String WHITE = "\033[97m";
+
+    /** Tagline rendered directly below the terminal logo. */
+    private static final String LOGO_TAGLINE = "Java Performance Monitor";
+
+    /** Ownership line established in the project LICENSE. */
+    private static final String LOGO_COPYRIGHT = "Copyright © 2026 Gökhan Durmaz";
 
     private static final int HISTORY_SIZE = 60;
     private static final int MAX_METRIC_ROWS = 12;
@@ -214,9 +221,11 @@ public class TuiRenderer {
         final String red;
         final String cyan;
         final String reset;
+        final String white;
 
         private Palette(String bold, String dim, String green,
-                        String yellow, String red, String cyan, String reset) {
+                        String yellow, String red, String cyan,
+                        String reset, String white) {
             this.bold = bold;
             this.dim = dim;
             this.green = green;
@@ -224,15 +233,59 @@ public class TuiRenderer {
             this.red = red;
             this.cyan = cyan;
             this.reset = reset;
+            this.white = white;
         }
 
         static Palette enabled() {
-            return new Palette(BOLD, DIM, GREEN, YELLOW, RED, CYAN, RESET);
+            return new Palette(
+                    BOLD, DIM, GREEN, YELLOW, RED, CYAN, RESET, WHITE);
         }
 
         static Palette disabled() {
-            return new Palette("", "", "", "", "", "", "");
+            return new Palette("", "", "", "", "", "", "", "");
         }
+    }
+
+    /** Renders the terminal-native block-letter JMon logo header. */
+    static List<String> logoHeader(Palette palette, String statusText) {
+        String ink = palette.bold + palette.white;
+        String accent = palette.bold + palette.cyan;
+
+        List<String> rows = new ArrayList<>();
+
+        String topRow = ink + "▀▀█ " + accent + "█▀▄▀█"
+                + palette.reset;
+        String statusRow = ink + "  █ " + accent + "█   █"
+                + palette.reset
+                + ink + " ▐▀▌ ▐▀▌   " + statusText + palette.reset;
+        String bottomRow = ink + "▄▄█ " + accent + "█   █"
+                + palette.reset
+                + ink + " ▐▄▌ ▐ ▌" + palette.reset;
+
+        rows.add(topRow);
+        rows.add(statusRow);
+        rows.add(bottomRow);
+
+        int blockWidth = Math.max(
+                visibleLength(topRow),
+                Math.max(
+                        visibleLength(statusRow),
+                        visibleLength(bottomRow)));
+
+        rows.add(logoInfoRow(palette, LOGO_TAGLINE, blockWidth));
+        rows.add(logoInfoRow(palette, LOGO_COPYRIGHT, blockWidth));
+
+        return rows;
+    }
+
+    /** Renders one muted info line centered under the logo block. */
+    private static String logoInfoRow(
+            Palette palette, String text, int blockWidth) {
+
+        // magic-exempt: even split into two side margins, clamped non-negative
+        int pad = Math.max(0, (blockWidth - visibleLength(text)) / TWO_COLUMN_SPLIT); // magic-exempt: two-way margin
+
+        return palette.dim + " ".repeat(pad) + text + palette.reset;
     }
 /** Appends a value to a bounded sparkline history. */
 
@@ -413,10 +466,10 @@ public class TuiRenderer {
         }
 
         List<String> lines = new ArrayList<>();
-        lines.add(palette.bold + " JMON " + palette.reset
-                + palette.bold + "JVM MONITOR " + palette.reset
-                + palette.red + palette.bold + " DISCONNECTED" + palette.reset
-                + palette.dim + "  " + targetPid + palette.reset);
+        lines.addAll(logoHeader(palette,
+                palette.red + palette.bold + " DISCONNECTED"
+                        + palette.reset
+                        + palette.dim + "  " + targetPid + palette.reset));
         lines.add("");
 
         lines.addAll(buildPanel(
@@ -547,16 +600,15 @@ public class TuiRenderer {
         }
 
         List<List<String>> blocks = new ArrayList<>();
-        String header =
-                palette.bold + " JMON " + palette.reset
-                        + palette.bold + "JVM MONITOR " + palette.reset
-                        + palette.dim + " LIVE  " + palette.reset
+        blocks.add(logoHeader(palette,
+                palette.dim + " LIVE  " + palette.reset
                         + palette.bold
-                        + shorten(process.getName(), PROCESS_NAME_MAX_WIDTH) + palette.reset
+                        + shorten(process.getName(), PROCESS_NAME_MAX_WIDTH)
+                        + palette.reset
                         + palette.dim + "  PID " + process.getPid()
                         + "  Java " + jvm.javaVersion()
-                        + "  " + shorten(jvm.runtimeName(), RUNTIME_NAME_MAX_WIDTH) + palette.reset;
-        blocks.add(List.of(fitVisible(header, terminalWidth)));
+                        + "  " + shorten(jvm.runtimeName(), RUNTIME_NAME_MAX_WIDTH)
+                        + palette.reset));
         blocks.add(topRow);
         blocks.add(buildPanel(
                 palette, "JVM ACTIVITY", activityContent, totalWidth));

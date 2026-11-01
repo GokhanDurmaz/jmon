@@ -437,6 +437,128 @@ class TuiRendererTest {
     }
 
     @Test
+    @DisplayName("Logo: dashboard header renders the block-letter JMon logo")
+    void testLogoRenderedOnDashboard() {
+        renderer.render(mockTerminal, systemDefaults(), processDefaults(),
+                jvmDefaults(), healthOk(), "Status", List.of(), 0L, 1000L,
+                "Leak", "Detail", 0.0, 0.0, Optional.empty());
+
+        String plain = stripAnsi(stringWriter.toString());
+        assertTrue(plain.contains("▀▀█ █▀▄▀█"),
+                "Logo must show the J top and M top rows");
+        assertTrue(plain.contains("  █ █   █ ▐▀▌ ▐▀▌"),
+                "Logo must show the J stem, M body and lowercase top rows");
+        assertTrue(plain.contains("▄▄█ █   █ ▐▄▌ ▐ ▌"),
+                "Logo must show the J hook and lowercase bottom rows");
+    }
+
+    @Test
+    @DisplayName("Logo: M carries the teal accent while other letters stay white")
+    void testLogoAccentColor() {
+        TuiRenderer colorRenderer = new TuiRenderer();
+        StringWriter writer = new StringWriter();
+        PrintWriter printWriter = new PrintWriter(writer);
+        Terminal colorTerminal = mock(Terminal.class);
+        when(colorTerminal.getWidth()).thenReturn(100);
+        when(colorTerminal.getNumericCapability(Mockito.any())).thenReturn(256);
+        when(colorTerminal.writer()).thenReturn(printWriter);
+
+        colorRenderer.render(colorTerminal, systemDefaults(), processDefaults(),
+                jvmDefaults(), healthOk(), "Status", List.of(), 0L, 1000L,
+                "Leak", "Detail", 0.0, 0.0, Optional.empty());
+
+        String output = writer.toString();
+        assertTrue(output.contains("\033[1m\033[97m▀▀█ "),
+                "Logo J strokes must use bold white");
+        assertTrue(output.contains("\033[1m\033[36m█▀▄▀█"),
+                "Logo M stroke must use the teal accent color");
+    }
+
+    @Test
+    @DisplayName("Logo: status line keeps process identity beside the logo")
+    void testLogoCarriesStatus() {
+        ProcessMetrics named = processDefaults();
+        when(named.getName()).thenReturn("MyApp");
+        when(named.getPid()).thenReturn(42722);
+
+        renderer.render(mockTerminal, systemDefaults(), named,
+                jvmDefaults(), healthOk(), "Status", List.of(), 0L, 1000L,
+                "Leak", "Detail", 0.0, 0.0, Optional.empty());
+
+        String plain = stripAnsi(stringWriter.toString());
+        assertTrue(plain.contains("▐▀▌ ▐▀▌    LIVE"),
+                "Status must sit beside the logo letters");
+        assertTrue(plain.contains("MyApp"), "Process name must survive the header change");
+        assertTrue(plain.contains("PID 42722"), "PID must survive the header change");
+    }
+
+    @Test
+    @DisplayName("Logo: muted info section sits below with tagline and copyright")
+    void testLogoInfoSection() {
+        renderer.render(mockTerminal, systemDefaults(), processDefaults(),
+                jvmDefaults(), healthOk(), "Status", List.of(), 0L, 1000L,
+                "Leak", "Detail", 0.0, 0.0, Optional.empty());
+
+        String plain = stripAnsi(stringWriter.toString());
+        assertTrue(plain.contains("Java Performance Monitor"),
+                "Tagline must render below the logo");
+        assertTrue(plain.contains("Copyright © 2026 Gökhan Durmaz"),
+                "Copyright line must use the LICENSE holder and year");
+        assertTrue(plain.indexOf("▄▄█ █   █ ▐▄▌ ▐ ▌")
+                < plain.indexOf("Java Performance Monitor"),
+                "Info section must sit directly below the logo rows");
+    }
+
+    @Test
+    @DisplayName("Logo: info lines are muted, dim and centered under the header block")
+    void testLogoInfoSectionMutedAndCentered() {
+        List<String> rows = TuiRenderer.logoHeader(
+                TuiRenderer.Palette.enabled(), " DISCONNECTED");
+
+        int blockWidth = stripAnsi(rows.get(1)).length(); // magic-exempt: first element index
+
+        assertTrue(rows.get(3).startsWith(TuiRenderer.DIM), // magic-exempt: first element index
+                "Tagline must use the dim (muted) SGR attribute");
+        assertTrue(rows.get(3).contains("Java Performance Monitor"));
+
+        assertTrue(rows.get(4).startsWith(TuiRenderer.DIM), // magic-exempt: first element index
+                "Copyright line must use the dim (muted) SGR attribute");
+        assertTrue(rows.get(4).contains("Copyright © 2026 Gökhan Durmaz"));
+
+        String plain = stripAnsi(rows.get(3)); // magic-exempt: first element index
+        int textWidth = plain.strip().length();
+        int leftPad = plain.length() - plain.stripLeading().length();
+
+        assertTrue(textWidth <= blockWidth,
+                "Tagline must fit inside the logo block width");
+        assertTrue(plain.stripLeading()
+                .startsWith("Java Performance Monitor"),
+                "Tagline text must follow only the centering pad");
+        assertTrue(leftPad == (blockWidth - textWidth) / 2, // magic-exempt: even split into two side margins
+                "Tagline must be centered inside the logo block");
+
+        String copyrightPlain = stripAnsi(rows.get(4)); // magic-exempt: first element index
+        assertTrue(copyrightPlain.contains("Copyright © 2026 Gökhan Durmaz"),
+                "Copyright row must carry the LICENSE ownership text");
+    }
+
+    @Test
+    @DisplayName("Logo: disabled palette renders the block letters without ANSI codes")
+    void testLogoNoColorPalette() {
+        List<String> rows = TuiRenderer.logoHeader(
+                TuiRenderer.Palette.disabled(), " DISCONNECTED");
+
+        // magic-exempt: intrinsic zero/one arithmetic operand
+        assertTrue(rows.size() == 5, "Logo header is five rows tall");
+        for (String row : rows) {
+            assertFalse(row.matches("(?s).*\\033\\[[0-9;]*[a-zA-Z]m.*"),
+                    "Disabled palette must not emit SGR escapes: " + row);
+        }
+        assertTrue(rows.get(1).endsWith(" DISCONNECTED"), // magic-exempt: first element index
+                "Second logo row must carry the status text");
+    }
+
+    @Test
     @DisplayName("Missing CPU utilization renders N/A instead of zero")
     void testMissingCpuShowsNotAvailable() {
         SystemMetrics missing = mock(SystemMetrics.class);
