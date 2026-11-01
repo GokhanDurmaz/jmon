@@ -290,3 +290,47 @@ TEST CONTENT
   Microsoft MoveFileEx MOVEFILE_REPLACE_EXISTING documentation); pre-fix POSIX
   success and post-fix success were verified empirically on macOS. Nothing was
   committed/pushed/tagged; WORKSPACE_EDIT_TEST.md and bin/ (untracked) untouched.
+
+## Session record — 2026-11-01 (Responsive dashboard breakpoints)
+- Goal: dashboard must adapt to smaller terminals instead of overflow/clipping
+  everything; "very small" shows a warning; sizes in between show fewer
+  essential metrics stacked vertically; no re-orientation of the logo or
+  removal of the logo/copyright section.
+- Implemented in TuiRenderer (single file, uncommitted at session end):
+  breakpoints MIN_RESPONSIVE_WIDTH=44, MIN_RESPONSIVE_HEIGHT=12,
+  COMPACT_WIDTH_THRESHOLD=80 (MINIMAL), MEDIUM_WIDTH_THRESHOLD=100 (TRIMMED),
+  >=100 = FULL (byte-identical to previous wide layout); width or height below
+  44x12 renders a "TERMINAL TOO SMALL" warning screen (still showing the logo
+  header, with "TERMINAL TOO SMALL" as the status text and the required
+  dimensions) instead of the dashboard; height 0 (mock/unknown) skips the
+  warning. MINIMAL (44..79 cols) stacks all panels vertically (SYSTEM
+  RESOURCES, TARGET JVM, JVM ACTIVITY, STATUS, optional SPRING BOOT METRICS,
+  MEMORY LEAK ANALYSIS, OBJECT & CLASS MEMORY) via new borderless
+  buildCompactPanel (title line + plain rows; saves 2 box-border rows per
+  panel) and numeric-only content (no bars/sparklines; system: CPU/RAM,
+  target: CPU/RSS/Heap used-max; Total/Used/Committed/Non-heap/history
+  dropped); TRIMMED (80..99) keeps the two-column layout, sparklines and
+  Committed/Non-heap and drops blank separators, Used and HEAP HISTORY.
+  Panels were refactored into content builders (springPanelContent,
+  leakPanelContent, classPanelContent) with wrapPanel choosing the bordered
+  or borderless wrapper. New unit tests (TuiRendererTest 41 -> 47): warning
+  screen at 40x12, wide layout intact at 120x40, TRIMMED trims decoration at
+  90x30 but keeps two columns, stacked compact at 60x20 keeps Heap/Uptime/
+  HEALTH without the wide top row, all five required sizes stay within
+  bounds, and repeated resize transitions both ways emit one full clear per
+  change with no layout leakage.
+- Verified: `./gradlew check` exit 0 (checkstyleMain/Test + pmdMain/Test 0
+  errors; 47 tests in TuiRendererTest, 0 failures; full suite green). Live
+  pty verification with pyte screen-model at 120x40 -> 100x30 -> 90x30 ->
+  80x24 -> 60x20 -> 40x12 restored wide restored to 120x40: every phase
+  cell-identical to a freshly started instance at the same size (only
+  live-data differences: sparkline history counts accumulate, leak observation
+  progresses to NORMAL, normalized digits compared). Full-clear escape count
+  per resize phase stayed <= 1 (no 2J storm; occasional phase-count 0 stems
+  from async WINCH pump vs 3s scheduler tick timing, not render defects).
+  MIN_RESPONSIVE_WIDTH is 44 (= legacy render floor) so existing narrow-panel
+  tests (e.g. leak panel at 44 cols) still render the dashboard; 40x12 is the
+  tested warning state.
+- Next: broaden live verification (help screen rendering at each size,
+  SIGWINCH during long runs), GUI pane-level resize tests, then commit this
+  session's work. WORKSPACE_EDIT_TEST.md and bin/ remain untracked/untouched.

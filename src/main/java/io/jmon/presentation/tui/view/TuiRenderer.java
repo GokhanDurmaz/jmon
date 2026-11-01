@@ -190,6 +190,34 @@ public class TuiRenderer {
     /** Ownership line established in the project LICENSE. */
     private static final String LOGO_COPYRIGHT = "Copyright © 2026 Gökhan Durmaz";
 
+    /** Narrowest width the responsive dashboard still accepts before warning. */
+    private static final int MIN_RESPONSIVE_WIDTH = 44;
+
+    /** Shortest height the responsive dashboard still accepts before warning. */
+    private static final int MIN_RESPONSIVE_HEIGHT = 12;
+
+    /** Width below which the dashboard stacks its panels vertically. */
+    private static final int COMPACT_WIDTH_THRESHOLD = 80;
+
+    /** Width below which the dashboard trims decorative spacing. */
+    private static final int MEDIUM_WIDTH_THRESHOLD = 100;
+
+    /** Rows composing the full logo header (logo, tagline, copyright). */
+    private static final int LOGO_HEADER_ROWS = 5;
+
+    /** Viewport rows needed to show the logo and the warning together. */
+    private static final int MIN_WARNING_LOGO_BUDGET = 8;
+
+    /** Responsive layout density selected from the terminal width. */
+    private enum Density {
+        /** Wide terminals: exact existing two-column layout, all details. */
+        FULL,
+        /** Medium terminals: two columns with decorative spacing trimmed. */
+        TRIMMED,
+        /** Small terminals: stacked panels with only essential metrics. */
+        MINIMAL
+    }
+
     private static final int HISTORY_SIZE = 60;
     private static final int MAX_METRIC_ROWS = 12;
     private static final int MIN_PANEL_WIDTH = 40;
@@ -524,8 +552,19 @@ public class TuiRenderer {
             Optional<SpringBootMetricsSnapshot> springMetrics) {
 
         Palette palette = paletteFor(terminal);
-        int terminalWidth = Math.max(MIN_PANEL_WIDTH, terminal.getWidth());
+        int rawWidth = terminal.getWidth();
         int terminalHeight = terminal.getHeight();
+
+        if (rawWidth < MIN_RESPONSIVE_WIDTH
+                || (terminalHeight > 0 // magic-exempt: mock dimensions of zero mean "unknown", not tiny
+                && terminalHeight < MIN_RESPONSIVE_HEIGHT)) {
+            renderTooSmall(terminal);
+            return;
+        }
+
+        Density density = densityFor(rawWidth);
+
+        int terminalWidth = Math.max(MIN_PANEL_WIDTH, rawWidth);
 
         Optional<Double> cpuOptional = system.getCpuUtilization();
 
@@ -560,21 +599,30 @@ public class TuiRenderer {
         int contentWidthRight = Math.max(MIN_COLUMN_WIDTH,
                 totalWidth - COLUMN_GAP_WIDTH - contentWidthLeft);
 
+        boolean stacked = density == Density.MINIMAL;
+
         List<String> systemContent =
                 systemPanel(palette, cpuOptional, ramAvailable, ramPercent,
-                        usedRamBytes, totalBytes, contentWidthLeft);
+                        usedRamBytes, totalBytes,
+                        stacked ? stackedContentWidth(totalWidth)
+                                : contentWidthLeft,
+                        density);
         List<String> targetContent =
                 targetPanel(palette, process, jvm, heapAvailable, heapPercent,
-                        contentWidthRight);
+                        stacked ? stackedContentWidth(totalWidth)
+                                : contentWidthRight,
+                        density);
 
-        List<String> topRow = buildTwoPanels(
-                palette,
-                "SYSTEM RESOURCES",
-                systemContent,
-                "TARGET JVM",
-                targetContent,
-                totalWidth
-        );
+        List<String> topRow = stacked
+                ? List.of()
+                : buildTwoPanels(
+                        palette,
+                        "SYSTEM RESOURCES",
+                        systemContent,
+                        "TARGET JVM",
+                        targetContent,
+                        totalWidth
+                );
 
         List<String> activityContent = new ArrayList<>();
         activityContent.add(
@@ -613,21 +661,37 @@ public class TuiRenderer {
                         + "  Java " + jvm.javaVersion()
                         + "  " + shorten(jvm.runtimeName(), RUNTIME_NAME_MAX_WIDTH)
                         + palette.reset));
-        blocks.add(topRow);
-        blocks.add(buildPanel(
-                palette, "JVM ACTIVITY", activityContent, totalWidth));
-        blocks.add(buildPanel(
-                palette, "STATUS", statusContent, totalWidth));
-
-        if (springMetrics.isPresent()) {
-            blocks.add(springPanel(
-                    palette, springMetrics.get(), totalWidth));
+        if (stacked) {
+            blocks.add(buildCompactPanel(
+                    palette, "SYSTEM RESOURCES", systemContent, totalWidth));
+            blocks.add(buildCompactPanel(
+                    palette, "TARGET JVM", targetContent, totalWidth));
+            blocks.add(buildCompactPanel(
+                    palette, "JVM ACTIVITY", activityContent, totalWidth));
+            blocks.add(buildCompactPanel(
+                    palette, "STATUS", statusContent, totalWidth));
+        } else {
+            blocks.add(topRow);
+            blocks.add(buildPanel(
+                    palette, "JVM ACTIVITY", activityContent, totalWidth));
+            blocks.add(buildPanel(
+                    palette, "STATUS", statusContent, totalWidth));
         }
 
-        blocks.add(leakPanel(palette, leakStatus, leakDetails,
-                leakHeapUsed, leakHeapMax, totalWidth));
-        blocks.add(classPanel(
-                palette, classMemoryStatus, classMemoryStats, totalWidth));
+        if (springMetrics.isPresent()) {
+            blocks.add(wrapPanel(palette, "SPRING BOOT METRICS",
+                    springPanelContent(palette, springMetrics.get(), totalWidth),
+                    stacked, totalWidth));
+        }
+
+        blocks.add(wrapPanel(palette, "MEMORY LEAK ANALYSIS",
+                leakPanelContent(palette, leakStatus, leakDetails,
+                        leakHeapUsed, leakHeapMax, totalWidth),
+                stacked, totalWidth));
+        blocks.add(wrapPanel(palette, "OBJECT & CLASS MEMORY (TOP 12)",
+                classPanelContent(palette, classMemoryStatus, classMemoryStats,
+                        totalWidth),
+                stacked, totalWidth));
 
         List<String> lines = assembleBlocks(
                 palette,
@@ -652,7 +716,8 @@ public class TuiRenderer {
             double ramPercent,
             double usedRamBytes,
             long totalBytes,
-            int contentWidth) {
+            int contentWidth,
+            Density density) {
 
         int barWidth = Math.max(MIN_BAR_WIDTH,
                 contentWidth - NARROW_BAR_INDENT);
@@ -661,12 +726,31 @@ public class TuiRenderer {
         content.add("CPU   " + cpuOptional
                 .map(value -> percent(value * MonitoringConstants.PERCENT_SCALE))
                 .orElse(UNAVAILABLE_TEXT));
+        content.add("RAM   " + (ramAvailable ? percent(ramPercent) : UNAVAILABLE_TEXT));
+
+        if (density == Density.MINIMAL) {
+            return content;
+        }
+
         cpuOptional.ifPresent(value ->
                 content.add(bar(palette, value * MonitoringConstants.PERCENT_SCALE, barWidth)));
-        content.add("RAM   " + (ramAvailable ? percent(ramPercent) : UNAVAILABLE_TEXT));
         if (ramAvailable) {
             content.add(bar(palette, ramPercent, barWidth));
         }
+
+        if (density == Density.MINIMAL) {
+            return content;
+        }
+
+        if (density == Density.TRIMMED) {
+            content.add(palette.bold + "CPU HISTORY" + palette.reset);
+            content.add(sparkline(palette, systemCpuHistory, barWidth));
+            content.add(palette.bold + "RAM HISTORY" + palette.reset);
+            content.add(sparkline(palette, systemRamHistory, barWidth));
+            content.add("Total " + formatBytes(totalBytes));
+            return content;
+        }
+
         content.add("");
         content.add(palette.bold + "CPU HISTORY" + palette.reset);
         content.add(sparkline(palette, systemCpuHistory, barWidth));
@@ -686,7 +770,8 @@ public class TuiRenderer {
             JvmMetrics jvm,
             boolean heapAvailable,
             double heapPercent,
-            int contentWidth) {
+            int contentWidth,
+            Density density) {
 
         int barWidth = Math.max(MIN_BAR_WIDTH,
                 contentWidth - NARROW_BAR_INDENT);
@@ -694,6 +779,15 @@ public class TuiRenderer {
         List<String> content = new ArrayList<>();
         content.add("CPU     " + percent(process.getCpuUtilization() * MonitoringConstants.PERCENT_SCALE));
         content.add("RSS     " + formatBytes(process.getMemory()));
+
+        if (density == Density.MINIMAL) {
+            content.add("Heap    "
+                    + (heapAvailable
+                    ? formatBytes(jvm.heapUsed()) + " / " + formatBytes(jvm.heapMax())
+                    : UNAVAILABLE_TEXT));
+            return content;
+        }
+
         content.add("");
         content.add(palette.bold + "JVM HEAP" + palette.reset);
         content.add(
@@ -704,6 +798,13 @@ public class TuiRenderer {
             content.add(percent(heapPercent));
             content.add(bar(palette, heapPercent, barWidth));
         }
+
+        if (density == Density.TRIMMED) {
+            content.add("Committed " + formatBytes(jvm.heapCommitted()));
+            content.add("Non-heap  " + formatBytes(jvm.nonHeapUsed()));
+            return content;
+        }
+
         content.add("");
         if (heapAvailable) {
             content.add(palette.bold + "HEAP HISTORY" + palette.reset);
@@ -715,7 +816,74 @@ public class TuiRenderer {
         return content;
     }
 
-    private List<String> springPanel(
+    /** Selects the responsive dashboard density from the terminal width. */
+    static Density densityFor(int terminalWidth) {
+        if (terminalWidth < COMPACT_WIDTH_THRESHOLD) {
+            return Density.MINIMAL;
+        }
+
+        if (terminalWidth < MEDIUM_WIDTH_THRESHOLD) {
+            return Density.TRIMMED;
+        }
+
+        return Density.FULL;
+    }
+
+    /** Content width of one stacked full-width small-layout panel. */
+    private static int stackedContentWidth(int totalWidth) {
+        return Math.max(MIN_LAYOUT_WIDTH,
+                totalWidth - FRAME_BORDERS_WIDTH);
+    }
+
+    /** Renders the very-small minimum-size warning instead of the dashboard. */
+    private void renderTooSmall(Terminal terminal) {
+        Palette palette = paletteFor(terminal);
+        int width = terminal.getWidth();
+        int height = terminal.getHeight();
+        int budget = Math.max(0, height - 1); // magic-exempt: clamp floor and one-row frame margin
+
+        String title = palette.bold + " TERMINAL TOO SMALL" + palette.reset;
+        String hint1 = palette.dim
+                + " Enlarge the terminal to at least"
+                + palette.reset;
+        String hint2 = String.format(Locale.ROOT,
+                "%s %d columns and %d rows to monitor.%s",
+                palette.dim, MIN_RESPONSIVE_WIDTH,
+                MIN_RESPONSIVE_HEIGHT, palette.reset);
+        String resume = palette.dim
+                + " The dashboard adapts automatically." + palette.reset;
+
+        List<String> lines = new ArrayList<>();
+
+        if (budget >= MIN_WARNING_LOGO_BUDGET) { // magic-exempt: rows needed for logo plus the warning text
+            lines.addAll(logoHeader(palette,
+                    palette.dim + " TERMINAL TOO SMALL" + palette.reset));
+            budget -= LOGO_HEADER_ROWS;
+            lines.add("");
+            budget--; // magic-exempt: blank separator row between logo and warning
+        }
+
+        if (budget > 0) { // magic-exempt: sanity guard against unknown/negative values
+            lines.add(title);
+            budget--;
+        }
+        if (budget > 0) { // magic-exempt: sanity guard against unknown/negative values
+            lines.add(hint1);
+            budget--;
+        }
+        if (budget > 0) { // magic-exempt: sanity guard against unknown/negative values
+            lines.add(hint2);
+            budget--;
+        }
+        if (budget > 0) { // magic-exempt: sanity guard against unknown/negative values
+            lines.add(resume);
+        }
+
+        drawFrame(terminal, widthBounded(lines, Math.max(MIN_LAYOUT_WIDTH, width)));
+    }
+
+    /** Holds the spring metrics panel content, shared by wrapped and compact layouts. */
+    private List<String> springPanelContent(
             Palette palette,
             SpringBootMetricsSnapshot snapshot,
             int width) {
@@ -776,10 +944,11 @@ public class TuiRenderer {
             }
         }
 
-        return buildPanel(palette, "SPRING BOOT METRICS", content, width);
+        return content;
     }
 
-    private List<String> leakPanel(
+    /** Holds the memory-leak panel content, shared by wrapped and compact layouts. */
+    private List<String> leakPanelContent(
             Palette palette,
             String leakStatus,
             String leakDetails,
@@ -829,7 +998,7 @@ public class TuiRenderer {
                         + palette.reset);
             }
 
-            return buildPanel(palette, "MEMORY LEAK ANALYSIS", content, width);
+            return content;
         }
 
         content.add(statusColor + palette.bold + status + palette.reset);
@@ -842,10 +1011,11 @@ public class TuiRenderer {
             );
         }
 
-        return buildPanel(palette, "MEMORY LEAK ANALYSIS", content, width);
+        return content;
     }
 
-    private List<String> classPanel(
+    /** Holds the object-and-class memory panel content for both wrap styles. */
+    private List<String> classPanelContent(
             Palette palette,
             String classMemoryStatus,
             List<ClassMemoryStat> classMemoryStats,
@@ -881,9 +1051,43 @@ public class TuiRenderer {
                     + palette.reset);
         }
 
-        return buildPanel(
-                palette, "OBJECT & CLASS MEMORY (TOP 12)",
-                content, width);
+        return content;
+    }
+
+    /**
+     * Renders a borderless stacked panel: a colored heading line followed by
+     * plain content rows. Saves the two box-border rows per panel so the
+     * compact layout can show more metrics in few terminal rows.
+     */
+    private List<String> buildCompactPanel(
+            Palette palette,
+            String title,
+            List<String> content,
+            int width) {
+
+        List<String> lines = new ArrayList<>();
+        lines.add(palette.cyan + palette.bold + title + palette.reset);
+        for (String item : content) {
+            lines.add(fitVisible(item, width));
+        }
+        return lines;
+    }
+
+    /**
+     * Wraps panel content either into the box-bordered wide-layout panel or
+     * into the borderless compact stacked panel.
+     */
+    private List<String> wrapPanel(
+            Palette palette,
+            String title,
+            List<String> content,
+            boolean stacked,
+            int width) {
+
+        if (stacked) {
+            return buildCompactPanel(palette, title, content, width);
+        }
+        return buildPanel(palette, title, content, width);
     }
 
     private static final class ClassColumns {

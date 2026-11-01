@@ -708,6 +708,244 @@ class TuiRendererTest {
     }
 
     @Test
+    @DisplayName("Responsive: very small terminals show a clean minimum-size warning")
+    void testVerySmallTerminalShowsWarning() {
+        StringWriter writer = new StringWriter();
+        Terminal tinyTerminal = mock(Terminal.class);
+        when(tinyTerminal.getWidth()).thenReturn(40);
+        when(tinyTerminal.getHeight()).thenReturn(12);
+        when(tinyTerminal.writer()).thenReturn(new PrintWriter(writer));
+
+        new TuiRenderer().render(tinyTerminal, systemDefaults(),
+                processDefaults(), jvmDefaults(), healthOk(), "Status",
+                List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0,
+                Optional.empty());
+
+        String plain = stripAnsi(writer.toString());
+        assertTrue(plain.contains("TERMINAL TOO SMALL"),
+                "Very small terminals must show the minimum-size warning");
+        assertTrue(plain.contains("44 columns and 12 rows"),
+                "The warning must state the minimum dimensions");
+        assertFalse(plain.contains("SYSTEM RESOURCES"),
+                "The dashboard must not render at very small sizes");
+        for (String line : plain.split("\n")) {
+            assertTrue(line.length() <= 40,
+                    "Warning must not overflow a 40-column terminal");
+        }
+    }
+
+    @Test
+    @DisplayName("Responsive: wide terminals keep the exact existing two-column layout")
+    void testWideKeepsTwoColumnLayout() {
+        StringWriter writer = new StringWriter();
+        Terminal wideTerminal = mock(Terminal.class);
+        when(wideTerminal.getWidth()).thenReturn(120);
+        when(wideTerminal.getHeight()).thenReturn(40);
+        when(wideTerminal.writer()).thenReturn(new PrintWriter(writer));
+
+        new TuiRenderer().render(wideTerminal, systemDefaults(),
+                processDefaults(), jvmDefaults(), healthOk(), "Status",
+                List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0,
+                Optional.empty());
+
+        String plain = stripAnsi(writer.toString());
+        assertTrue(plain.contains("┬"),
+                "Wide layout must use the two-column panel row");
+        assertTrue(plain.contains("CPU HISTORY"),
+                "Wide layout must keep the CPU history sparkline");
+        assertTrue(plain.contains("RAM HISTORY"),
+                "Wide layout must keep the RAM history sparkline");
+        assertTrue(plain.contains("Used"),
+                "Wide layout must keep the used-memory detail");
+        assertTrue(plain.contains("HEAP HISTORY"),
+                "Wide layout must keep the heap history sparkline");
+        assertTrue(plain.contains("Committed"),
+                "Wide layout must keep the committed-heap detail");
+    }
+
+    @Test
+    @DisplayName("Responsive: medium terminals trim spacing but keep two columns")
+    void testMediumTrimsDecorationKeepsColumns() {
+        StringWriter writer = new StringWriter();
+        Terminal mediumTerminal = mock(Terminal.class);
+        when(mediumTerminal.getWidth()).thenReturn(90);
+        when(mediumTerminal.getHeight()).thenReturn(30);
+        when(mediumTerminal.writer()).thenReturn(new PrintWriter(writer));
+
+        new TuiRenderer().render(mediumTerminal, systemDefaults(),
+                processDefaults(), jvmDefaults(), healthOk(), "Status",
+                List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0,
+                Optional.empty());
+
+        String plain = stripAnsi(writer.toString());
+        assertTrue(plain.contains("┬"),
+                "Medium layout must keep the two-column panel row");
+        assertTrue(plain.contains("CPU HISTORY"),
+                "Medium layout must keep the sparklines");
+        assertFalse(plain.contains("Used"),
+                "Medium layout must trim the used-memory detail line");
+        assertTrue(plain.contains("Committed"),
+                "Medium layout must keep committed-heap detail");
+    }
+
+    @Test
+    @DisplayName("Responsive: small terminals stack panels and keep essential metrics")
+    void testSmallStacksPanels() {
+        StringWriter writer = new StringWriter();
+        Terminal smallTerminal = mock(Terminal.class);
+        when(smallTerminal.getWidth()).thenReturn(60);
+        when(smallTerminal.getHeight()).thenReturn(20);
+        when(smallTerminal.writer()).thenReturn(new PrintWriter(writer));
+
+        new TuiRenderer().render(smallTerminal, systemDefaults(),
+                processDefaults(), jvmDefaults(), healthOk(), "Status",
+                List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0,
+                Optional.empty());
+
+        String plain = stripAnsi(writer.toString());
+        assertFalse(plain.contains("┬"),
+                "Small layout must not force the two-column panel row");
+        assertTrue(plain.contains("SYSTEM RESOURCES"),
+                "Small layout must show the system panel");
+        assertTrue(plain.contains("TARGET JVM"),
+                "Small layout must show the JVM panel");
+        assertFalse(plain.contains("CPU HISTORY"),
+                "Small layout must drop decorative sparklines");
+        assertFalse(plain.contains("HEAP HISTORY"),
+                "Small layout must drop decorative sparklines");
+        assertFalse(plain.contains("Used"),
+                "Small layout must drop the used-memory detail");
+        assertTrue(plain.contains("Heap    "),
+                "Small layout must keep the heap usage prominently");
+        assertTrue(plain.contains("Uptime"),
+                "Small layout must keep essential JVM metrics");
+        assertTrue(plain.contains("HEALTH:"),
+                "Small layout must keep the health status");
+        for (String line : plain.split("\n")) {
+            assertTrue(line.length() <= 60,
+                    "Small layout must not overflow a 60-column terminal: "
+                            + line.length());
+        }
+    }
+
+    @Test
+    @DisplayName("Responsive: every required terminal size renders without overflow")
+    void testAllRequiredSizesRenderWithinBounds() {
+        int[][] sizes = {
+                {120, 40}, {100, 30}, {80, 24}, {60, 20}, {40, 12}
+        };
+
+        for (int[] size : sizes) {
+            StringWriter writer = new StringWriter();
+            Terminal sizeTerminal = mock(Terminal.class);
+            when(sizeTerminal.getWidth()).thenReturn(size[0]);
+            when(sizeTerminal.getHeight()).thenReturn(size[1]);
+            when(sizeTerminal.writer()).thenReturn(new PrintWriter(writer));
+
+            new TuiRenderer().render(sizeTerminal, systemDefaults(),
+                    processDefaults(), jvmDefaults(), healthOk(), "Status",
+                    List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0,
+                    Optional.empty());
+
+            for (String line : stripAnsi(writer.toString()).split("\n")) {
+                assertTrue(line.length() <= size[0],
+                        "Line exceeds terminal width " + size[0]
+                                + ": '" + line + "' (" + line.length() + ")");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("Responsive: repeated size transitions flow compact-arrow-wide both ways")
+    void testResponsiveLayoutTransitionsBothWays() {
+        StringWriter writer = new StringWriter();
+        Terminal churnTerminal = mock(Terminal.class);
+        when(churnTerminal.writer()).thenReturn(new PrintWriter(writer));
+
+        int[] size = {40, 12};
+        when(churnTerminal.getWidth()).thenAnswer(inv -> size[0]);
+        when(churnTerminal.getHeight()).thenAnswer(inv -> size[1]);
+
+        TuiRenderer churnRenderer = new TuiRenderer();
+
+        String[] plainLog = new String[4];
+        int renderIndex = 0;
+
+        size[0] = 40;
+        size[1] = 12;
+        churnRenderer.render(churnTerminal, systemDefaults(),
+                processDefaults(), jvmDefaults(), healthOk(), "Status",
+                List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0,
+                Optional.empty());
+        plainLog[renderIndex++] = stripAnsi(writer.toString());
+        int afterFirst = writer.toString().length();
+
+        size[0] = 120;
+        size[1] = 40;
+        churnRenderer.render(churnTerminal, systemDefaults(),
+                processDefaults(), jvmDefaults(), healthOk(), "Status",
+                List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0,
+                Optional.empty());
+        String afterEnlarge = writer.toString().substring(afterFirst);
+        plainLog[renderIndex++] = stripAnsi(afterEnlarge);
+        int afterSecond = writer.toString().length();
+
+        assertTrue(stripAnsi(afterEnlarge).contains("┬"),
+                "Enlarging must restore the wide two-column layout");
+        assertTrue(stripAnsi(afterEnlarge).contains("CPU HISTORY"),
+                "Enlarging must restore the sparkline panels");
+
+        size[0] = 90;
+        size[1] = 30;
+        churnRenderer.render(churnTerminal, systemDefaults(),
+                processDefaults(), jvmDefaults(), healthOk(), "Status",
+                List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0,
+                Optional.empty());
+        String afterMedium = writer.toString().substring(afterSecond);
+        int afterThird = writer.toString().length();
+        plainLog[renderIndex++] = stripAnsi(afterMedium);
+
+        size[0] = 60;
+        size[1] = 20;
+        churnRenderer.render(churnTerminal, systemDefaults(),
+                processDefaults(), jvmDefaults(), healthOk(), "Status",
+                List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0,
+                Optional.empty());
+        String afterSmall = writer.toString().substring(afterThird);
+        int afterFourth = writer.toString().length();
+        plainLog[renderIndex++] = stripAnsi(afterSmall);
+
+        assertFalse(stripAnsi(afterSmall).contains("┬"),
+                "Shrinking must switch to the stacked compact layout");
+        assertTrue(stripAnsi(afterSmall).contains("Heap    "),
+                "Compact layout must keep heap essentials");
+
+        size[0] = 120;
+        size[1] = 40;
+        churnRenderer.render(churnTerminal, systemDefaults(),
+                processDefaults(), jvmDefaults(), healthOk(), "Status",
+                List.of(), 0L, 1000L, "Leak", "Detail", 0.0, 0.0,
+                Optional.empty());
+        String afterWideAgain = writer.toString().substring(afterFourth);
+        assertTrue(stripAnsi(afterWideAgain).contains("┬"),
+                "Enlarging again must restore the wide layout");
+        assertFalse(stripAnsi(afterWideAgain).contains("TERMINAL TOO SMALL"),
+                "The warning must not persist after enlargement");
+
+        int clearCount = writer.toString().split(
+                java.util.regex.Pattern.quote("\033[2J"), -1).length - 1;
+        // Five renders with five distinct sizes: first frame + four
+        // dimension transitions, exercising the existing resize machinery.
+        assertTrue(clearCount == 5, // magic-exempt: intrinsic zero/one arithmetic operand
+                "Every size transition must fully clear stale layout content");
+
+        for (String plain : plainLog) {
+            assertFalse(plain.contains("clipped") && plain.contains("TERMINAL TOO SMALL"),
+                    "Warning and dashboard must never mix in one frame");
+        }
+    }
+
+    @Test
     @DisplayName("Missing CPU utilization renders N/A instead of zero")
     void testMissingCpuShowsNotAvailable() {
         SystemMetrics missing = mock(SystemMetrics.class);
