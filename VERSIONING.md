@@ -93,11 +93,31 @@ generated release notes.
   regression fix for the TUI refresh schedule (keyboard wake-ups
   triggering unscheduled metrics collection), verified by branch CI and
   the tag-triggered release workflow.
-- `v0.3.0` - current published release
+- `v0.3.0` - previous published release
   (https://github.com/GokhanDurmaz/jmon/releases/tag/v0.3.0): self-update
   feature (`jmon --update`) with SHA-256 checksum verification, validated
   extraction and an atomic install swap, verified by branch CI and the
   tag-triggered release workflow.
+- `v0.3.1` - previous published release
+  (https://github.com/GokhanDurmaz/jmon/releases/tag/v0.3.1): patch with
+  self-update hardening fixes (artifact-filename-bound checksum
+  verification, rejected backslash zip entry names, enforced single
+  top-level tar directory, bounded TAR metadata allocation, hardened
+  self-update HTTP handling), verified by branch CI and the tag-triggered
+  release workflow.
+- `v0.3.2` - previous published release
+  (https://github.com/GokhanDurmaz/jmon/releases/tag/v0.3.2): patch fix for
+  the Windows self-update swap failure (the backup move target is now
+  reserved as an absent path so the atomic swap works on both POSIX and
+  Windows), verified by branch CI and the tag-triggered release workflow.
+- `v0.3.3` - current published release
+  (https://github.com/GokhanDurmaz/jmon/releases/tag/v0.3.3): terminal
+  dashboard refinements - a terminal-native JMon logo with tagline and
+  copyright, clean full-clear redraw after terminal resize, and responsive
+  dashboard layout breakpoints (stacked compact layout below 80 columns,
+  trimmed two-column layout below 100 columns, and a terminal-too-small
+  warning below 44x12), verified by branch CI and the tag-triggered release
+  workflow.
 
 ## 4. Standard Release Workflow
 
