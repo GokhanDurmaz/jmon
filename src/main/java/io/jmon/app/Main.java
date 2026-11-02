@@ -114,6 +114,7 @@ public class Main {
             case COMPLETED:
             case UP_TO_DATE:
             case NO_RELEASE:
+            case DEFERRED:
                 return SUCCESS_EXIT_CODE;
             case FAILED:
             default:

@@ -43,6 +43,14 @@ public class UpdateManager {
         NO_RELEASE,
         /** The update was performed successfully. */
         COMPLETED,
+        /**
+         * The update is staged and verified, and a detached updater
+         * process will apply it automatically as soon as this process
+         * exits (Windows only: the running JVM holds its launcher jar
+         * open inside the installation, and Windows forbids renaming a
+         * directory subtree that contains open file handles).
+         */
+        DEFERRED,
         /** The update could not be performed (environment or network).
          *  User-visible remedy guidance then applies. */
         FAILED
@@ -61,7 +69,11 @@ public class UpdateManager {
     private final InstalledVersionReader installedVersionReader;
     private final String osName;
     private final PrintStream out;
+    /** Populated only when the Windows flow successfully defers; the
+     * deferred applier takes ownership of the work directory cleanup. */
+    private Path deferredWorkDirectory;
     private final Supplier<Optional<Path>> codeLocationSupplier;
+    private final DeferredUpdateHandoff deferredHandoff;
 
     /**
      * Production wiring over the shared environment.
@@ -71,7 +83,9 @@ public class UpdateManager {
                 new Installer(), PathResolver.defaultResolver(),
                 new InstalledVersionReader(),
                 System.getProperty("os.name"), System.out,
-                UpdateManager::currentCodeLocation);
+                UpdateManager::currentCodeLocation,
+                new DeferredUpdateHandoff(
+                        DeferredUpdateHandoff.systemLauncher()));
     }
 
     /**
@@ -94,6 +108,36 @@ public class UpdateManager {
             InstalledVersionReader installedVersionReader,
             String osName, PrintStream out,
             Supplier<Optional<Path>> codeLocationSupplier) {
+        this(discovery, downloader, installer, pathResolver,
+                installedVersionReader, osName, out, codeLocationSupplier,
+                new DeferredUpdateHandoff(
+                        DeferredUpdateHandoff.systemLauncher()));
+    }
+
+    /**
+     * Injectable wiring used by tests that observe the deferred
+     * Windows handoff.
+     *
+     * @param discovery              release metadata source
+     * @param downloader             artifact downloader
+     * @param installer              validation/extraction/swap engine
+     * @param pathResolver           installation path resolution
+     * @param installedVersionReader installed-version determination
+     * @param osName                 {@code os.name} value
+     * @param out                    progress/consultation sink
+     * @param codeLocationSupplier   on-disk location of the running
+     *                               update code; empty when
+     *                               undeterminable
+     * @param deferredHandoff        prepares and launches the detached
+     *                               applier for the Windows path
+     */
+    public UpdateManager(ReleaseDiscovery discovery,
+            DownloadManager downloader, Installer installer,
+            PathResolver pathResolver,
+            InstalledVersionReader installedVersionReader,
+            String osName, PrintStream out,
+            Supplier<Optional<Path>> codeLocationSupplier,
+            DeferredUpdateHandoff deferredHandoff) {
         this.discovery = discovery;
         this.downloader = downloader;
         this.installer = installer;
@@ -102,6 +146,7 @@ public class UpdateManager {
         this.osName = osName;
         this.out = out;
         this.codeLocationSupplier = codeLocationSupplier;
+        this.deferredHandoff = deferredHandoff;
     }
 
     /**
@@ -389,6 +434,12 @@ public class UpdateManager {
             Path staged = installer.stageAndExtract(archive, workDir,
                     selected.format());
 
+            if (selected.format()
+                    == ArtifactSelector.PackageFormat.WINDOWS) {
+                return deferWindowsUpdate(installRoot, workDir, archive,
+                        downloaded.sha256Hex(), staged, latest);
+            }
+
             out.println("Installing...");
             Path backup = installer.swapWithBackup(installRoot, staged);
             Installer.deleteQuietly(backup);
@@ -397,8 +448,64 @@ public class UpdateManager {
             return new UpdateOutcome(State.COMPLETED,
                     "Updated to version " + latest.version());
         } finally {
-            Installer.deleteQuietly(workDir);
+            if (deferredWorkDirectory == null) {
+                Installer.deleteQuietly(workDir);
+            }
         }
+    }
+
+    /**
+     * The asking JVM runs from the installed distribution and holds
+     * its launcher jar open inside the installation root; Windows
+     * forbids renaming a directory subtree that contains open file
+     * handles, so an in-process swap fails with "cannot move the
+     * current installation aside". The swap is therefore handed to a
+     * detached applier that waits for this process to exit. The work
+     * directory intentionally survives this process: the applier owns
+     * it afterwards.
+     *
+     * @param installRoot  installed directory
+     * @param workDir      staging workspace for this update attempt
+     * @param archive      downloaded artifact inside the work directory
+     * @param archiveSha   verified download digest
+     * @param staged       staged new installation tree
+     * @param latest       resolved version comparator of the release
+     * @return a {@link State#DEFERRED} outcome when staging succeeded
+     * @throws IOException when the handoff cannot be prepared
+     */
+    private UpdateOutcome deferWindowsUpdate(Path installRoot,
+            Path workDir, Path archive, String archiveSha, Path staged,
+            VersionComparator latest)
+            throws IOException {
+        Optional<Path> updaterJarSource = codeLocationSupplier.get();
+        if (updaterJarSource.isEmpty()
+                || !Files.isRegularFile(updaterJarSource.get())) {
+            throw new IOException("cannot stage the deferred update:"
+                    + " the running application jar could not be"
+                    + " located on disk.");
+        }
+        ProcessHandle current = ProcessHandle.current();
+        DeferredUpdateHandoff.DeferredUpdate handoff = deferredHandoff
+                .handoff(new DeferredUpdateHandoff.DeferredUpdateSpec(
+                        installRoot, staged, workDir, archive, archiveSha,
+                        current.pid(), current.info().startInstant(),
+                        updaterJarSource.get()));
+        deferredWorkDirectory = workDir;
+        out.println("Update staged: the detached updater will apply"
+                + " version " + latest.version() + " automatically as"
+                + " soon as this JMon process exits. Monitoring"
+                + " progress is possible with the log "
+                + handoff.stateFile().resolveSibling(
+                        DeferredUpdateHandoff.LOG_FILE_NAME) + ".");
+        return new UpdateOutcome(State.DEFERRED,
+                "Update to version " + latest.version()
+                        + " is staged and will be applied right after"
+                        + " this JMon process exits. If it does not"
+                        + " complete, inspect "
+                        + DeferredUpdateHandoff.RESULT_FILE_NAME
+                        + " and "
+                        + DeferredUpdateHandoff.LOG_FILE_NAME
+                        + " under " + workDir + ".");
     }
 
     private static String sanitize(Exception e) {
